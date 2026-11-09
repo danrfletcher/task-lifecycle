@@ -102,13 +102,18 @@ export function addStamp(line: string, kind: StampKind, date: string): string {
  * - Not a task line: unchanged.
  *
  * `today` is a YYYY-MM-DD string or a Date (local date is used).
+ *
+ * `options.stampsOn` (default true) is the "Close stamps" setting: when false
+ * nothing is added or removed and the line is returned unchanged.
  */
 export function applyStampTransition(
 	line: string,
 	from: string,
 	to: string,
-	today: string | Date
+	today: string | Date,
+	options: { stampsOn?: boolean } = {}
 ): string {
+	if (options.stampsOn === false) return line;
 	if (!isTaskLine(line)) return line;
 
 	const fromKind = statusKind(from);

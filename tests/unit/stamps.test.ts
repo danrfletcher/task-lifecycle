@@ -5,6 +5,7 @@ import {
 	findStamps,
 	removeStamps,
 } from "../../src/domain/stamps";
+import { getCheckboxStatusChar } from "../../src/domain/line-classifier";
 import { statusKind } from "../../src/domain/status-sequence";
 
 const TODAY = "2026-11-09";
@@ -367,4 +368,247 @@ describe("applyStampTransition: only stamps and the space before them change", (
 			}
 		});
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Rule table: every (from, to) pair x every line shape, with the expected text
+// written out by hand (G7-G11, E1, E2, E4). "{c}" stands for the status char
+// the line already carries (the `to` char); the date is the fixed 2026-11-09.
+// ---------------------------------------------------------------------------
+
+const CHARS = [" ", "/", "x", "X", "-", "?"] as const;
+const KIND: Record<string, "open" | "progress" | "done" | "cancelled"> = {
+	" ": "open",
+	"?": "open",
+	"/": "progress",
+	x: "done",
+	X: "done",
+	"-": "cancelled",
+};
+
+interface Shape {
+	name: string;
+	input: string;
+	/** Expected result when the new status is done / cancelled / open-or-in-progress. */
+	done: string;
+	cancelled: string;
+	reopened: string;
+}
+
+const SHAPES: Shape[] = [
+	{
+		name: "plain",
+		input: "- [{c}] Task",
+		done: "- [{c}] Task ✅ 2026-11-09",
+		cancelled: "- [{c}] Task ❌ 2026-11-09",
+		reopened: "- [{c}] Task",
+	},
+	{
+		name: "block id (E1)",
+		input: "- [{c}] Ship release ^rel1",
+		done: "- [{c}] Ship release ✅ 2026-11-09 ^rel1",
+		cancelled: "- [{c}] Ship release ❌ 2026-11-09 ^rel1",
+		reopened: "- [{c}] Ship release ^rel1",
+	},
+	{
+		name: "^ that is not the last token is not a block id (E1)",
+		input: "- [{c}] a ^b c",
+		done: "- [{c}] a ^b c ✅ 2026-11-09",
+		cancelled: "- [{c}] a ^b c ❌ 2026-11-09",
+		reopened: "- [{c}] a ^b c",
+	},
+	{
+		name: "chip with a bare emoji (G11/E2)",
+		input: '- [{c}] Task <span class="chip">✅ Approved</span>',
+		done: '- [{c}] Task <span class="chip">✅ Approved</span> ✅ 2026-11-09',
+		cancelled: '- [{c}] Task <span class="chip">✅ Approved</span> ❌ 2026-11-09',
+		reopened: '- [{c}] Task <span class="chip">✅ Approved</span>',
+	},
+	{
+		name: "chip and a dated stamp (E2)",
+		input: '- [{c}] Task <span class="chip">❌ Blocked</span> ✅ 2026-11-01',
+		done: '- [{c}] Task <span class="chip">❌ Blocked</span> ✅ 2026-11-09',
+		cancelled: '- [{c}] Task <span class="chip">❌ Blocked</span> ❌ 2026-11-09',
+		reopened: '- [{c}] Task <span class="chip">❌ Blocked</span>',
+	},
+	{
+		name: "trailing spaces (E4)",
+		input: "- [{c}] Task  ",
+		done: "- [{c}] Task ✅ 2026-11-09",
+		cancelled: "- [{c}] Task ❌ 2026-11-09",
+		reopened: "- [{c}] Task  ",
+	},
+	{
+		name: "double spaces inside the line are kept (E4)",
+		input: "- [{c}] a  b   c",
+		done: "- [{c}] a  b   c ✅ 2026-11-09",
+		cancelled: "- [{c}] a  b   c ❌ 2026-11-09",
+		reopened: "- [{c}] a  b   c",
+	},
+	{
+		name: "indentation is kept (E4)",
+		input: "\t  - [{c}] Task",
+		done: "\t  - [{c}] Task ✅ 2026-11-09",
+		cancelled: "\t  - [{c}] Task ❌ 2026-11-09",
+		reopened: "\t  - [{c}] Task",
+	},
+	{
+		name: "existing done stamp",
+		input: "- [{c}] Task ✅ 2026-11-01",
+		done: "- [{c}] Task ✅ 2026-11-09",
+		cancelled: "- [{c}] Task ❌ 2026-11-09",
+		reopened: "- [{c}] Task",
+	},
+	{
+		name: "existing cancelled stamp",
+		input: "- [{c}] Task ❌ 2026-11-01",
+		done: "- [{c}] Task ✅ 2026-11-09",
+		cancelled: "- [{c}] Task ❌ 2026-11-09",
+		reopened: "- [{c}] Task",
+	},
+	{
+		name: "both stamps",
+		input: "- [{c}] Task ✅ 2026-11-01 ❌ 2026-10-01",
+		done: "- [{c}] Task ✅ 2026-11-09",
+		cancelled: "- [{c}] Task ❌ 2026-11-09",
+		reopened: "- [{c}] Task",
+	},
+	{
+		name: "existing stamp before a block id",
+		input: "- [{c}] Task ✅ 2026-11-01 ^id",
+		done: "- [{c}] Task ✅ 2026-11-09 ^id",
+		cancelled: "- [{c}] Task ❌ 2026-11-09 ^id",
+		reopened: "- [{c}] Task ^id",
+	},
+	{
+		name: "stamp in the middle of the line",
+		input: "- [{c}] Task ✅ 2026-11-01 more text ^id",
+		done: "- [{c}] Task more text ✅ 2026-11-09 ^id",
+		cancelled: "- [{c}] Task more text ❌ 2026-11-09 ^id",
+		reopened: "- [{c}] Task more text ^id",
+	},
+];
+
+describe("applyStampTransition: rule table (every pair x every line shape)", () => {
+	for (const shape of SHAPES) {
+		describe(shape.name, () => {
+			for (const from of CHARS) {
+				for (const to of CHARS) {
+					it(`${JSON.stringify(from)} -> ${JSON.stringify(to)}`, () => {
+						const fill = (t: string) => t.replace("{c}", to);
+						const input = fill(shape.input);
+						let want: string;
+						if (KIND[from] === KIND[to]) want = input; // G10: no kind change
+						else if (KIND[to] === "done") want = fill(shape.done);
+						else if (KIND[to] === "cancelled") want = fill(shape.cancelled);
+						else want = fill(shape.reopened);
+						expect(applyStampTransition(input, from, to, "2026-11-09")).toBe(want);
+					});
+				}
+			}
+		});
+	}
+
+	it("stampsOn:false changes nothing for any pair or shape (G20)", () => {
+		for (const shape of SHAPES) {
+			for (const from of CHARS) {
+				for (const to of CHARS) {
+					const input = shape.input.replace("{c}", to);
+					expect(
+						applyStampTransition(input, from, to, "2026-11-09", { stampsOn: false })
+					).toBe(input);
+				}
+			}
+		}
+	});
+
+	it("stampsOn:true is the default", () => {
+		expect(
+			applyStampTransition("- [x] a", " ", "x", "2026-11-09", { stampsOn: true })
+		).toBe("- [x] a ✅ 2026-11-09");
+	});
+
+	it("zero-pads month and day from a Date", () => {
+		expect(
+			applyStampTransition("- [x] a", " ", "x", new Date(2026, 0, 5))
+		).toBe("- [x] a ✅ 2026-01-05");
+	});
+
+	it("G10: a repeated close keeps the old date", () => {
+		expect(
+			applyStampTransition("- [X] a ✅ 2026-11-01", "x", "X", "2026-11-09")
+		).toBe("- [X] a ✅ 2026-11-01");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// F4 property: for random task lines and transitions the result differs from
+// the input only in stamp tokens and the whitespace right before them.
+// ---------------------------------------------------------------------------
+
+/** Small seeded PRNG (mulberry32), so a failure reproduces. */
+function rng(seed: number) {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) >>> 0;
+		let t = a;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+describe("applyStampTransition: property (F4)", () => {
+	const stampToken = / ?(?:✅|❌) \d{4}-\d{2}-\d{2}\b/g;
+	/** Drop stamp tokens, then the whitespace run right before the end or a trailing block id. */
+	const canon = (s: string) =>
+		s.replace(stampToken, "").replace(/\s+(?=(?:\^[A-Za-z0-9-]+\s*)?$)/, "");
+
+	const markers = ["-", "*", "+", "1.", "1)", "> -", "> > 2."];
+	const indents = ["", "  ", "\t", "\t\t "];
+	const pieces = [
+		"word",
+		"a  b",
+		"café",
+		"🎉",
+		"日本語",
+		'<span class="chip">✅ ok</span>',
+		"✅",
+		"❌ nope",
+		"✅ 2026-11-01",
+		"❌ 2026-10-31",
+		"^b",
+		"  ",
+		"2026-11-09",
+	];
+	const ends = ["", " ", "   ", " ^rel1", "  ^id-2  ", "\r", " ✅ 2026-11-01", " ❌ 2026-11-01 ^x"];
+
+	it("2000 random lines and transitions", () => {
+		const rand = rng(61);
+		const pick = <T,>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)];
+		for (let i = 0; i < 2000; i++) {
+			const text = Array.from({ length: Math.floor(rand() * 5) }, () => pick(pieces)).join(" ");
+			const from = pick(CHARS);
+			const to = pick(CHARS);
+			const before = `${pick(indents)}${pick(markers)} [${to}] ${text}${pick(ends)}`;
+			const after = applyStampTransition(before, from, to, "2026-11-09");
+			const ctx = JSON.stringify({ before, from, to, after });
+
+			// The status char is never written.
+			expect(getCheckboxStatusChar(after), ctx).toBe(getCheckboxStatusChar(before));
+			// Only stamp tokens and the space before them differ.
+			expect(canon(after), ctx).toBe(canon(before));
+			// No kind change: nothing at all changes.
+			if (KIND[from] === KIND[to]) expect(after, ctx).toBe(before);
+			// A close leaves exactly one stamp, dated today; a reopen leaves none.
+			const stamps = findStamps(after);
+			if (KIND[from] !== KIND[to]) {
+				if (KIND[to] === "done") expect(stamps.map((s) => [s.kind, s.date]), ctx).toEqual([["done", "2026-11-09"]]);
+				else if (KIND[to] === "cancelled") expect(stamps.map((s) => [s.kind, s.date]), ctx).toEqual([["cancelled", "2026-11-09"]]);
+				else expect(stamps, ctx).toEqual([]);
+			}
+			// Idempotent: applying the same transition to its own result changes nothing more.
+			expect(applyStampTransition(after, to, to, "2026-11-10"), ctx).toBe(after);
+		}
+	});
 });

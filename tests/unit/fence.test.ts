@@ -103,6 +103,27 @@ describe("fence regression checks", () => {
 		expect(constants.CASCADE_DEDUPE_MS).toBe(1500);
 	});
 
+	it("F2: no vault modify handling, no vault writes, no task index, no headless path in src", () => {
+		expect(
+			hits(
+				srcFiles,
+				/vault\.on\(\s*["']modify["']|vault\.modify|vault\.process|vault\.append|metadataCache|modifyHeadless|onStatusChanged/
+			)
+		).toEqual([]);
+	});
+
+	it("F5/F9: no agile: events, no document.dispatchEvent, no workspace.trigger, no <style in the new files", () => {
+		const added = srcFiles.filter((p) => /src\/(editor|events)\//.test(p) || /task-line-diff/.test(p));
+		expect(added.length).toBeGreaterThanOrEqual(3);
+		expect(hits(added, /agile:|document\.dispatchEvent|dispatchEvent\(|workspace\.trigger|<style/i)).toEqual([]);
+	});
+
+	it("F4: the change detector never writes a status char", () => {
+		const editorFiles = srcFiles.filter((p) => /src\/(editor|events)\//.test(p));
+		expect(editorFiles.length).toBeGreaterThanOrEqual(2);
+		expect(hits(editorFiles, /setCheckboxStatusChar/)).toEqual([]);
+	});
+
 	it("F8: domain functions take no sequence, emoji or timing from outside", () => {
 		// Declared parameter counts: a function that took a custom sequence or
 		// emoji would show up as an extra parameter.

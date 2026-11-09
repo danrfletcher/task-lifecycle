@@ -2,7 +2,17 @@
  * Minimal runtime stand-in for the `obsidian` module, wired in through the
  * alias in vitest.config.ts. The real package ships types only.
  */
+import { StateField, type Extension } from "@codemirror/state";
 import { vi } from "vitest";
+
+/**
+ * Stand-in for Obsidian's `editorInfoField`. Tests give a state a fake file
+ * with `editorInfoField.init(() => ({ file }))`.
+ */
+export const editorInfoField = StateField.define<{ file: unknown } | null>({
+	create: () => null,
+	update: (value) => value,
+});
 
 export class MockElement {
 	children: unknown[] = [];
@@ -76,6 +86,7 @@ export class Plugin {
 	dataFile: unknown = undefined;
 	settingTabs: unknown[] = [];
 	addCommand = vi.fn();
+	editorExtensions: Extension[] = [];
 	constructor(
 		public app: unknown = new App(),
 		public manifest: unknown = {}
@@ -85,6 +96,9 @@ export class Plugin {
 	}
 	async saveData(data: unknown): Promise<void> {
 		this.dataFile = JSON.parse(JSON.stringify(data));
+	}
+	registerEditorExtension(extension: Extension): void {
+		this.editorExtensions.push(extension);
 	}
 	addSettingTab(tab: unknown): void {
 		this.settingTabs.push(tab);

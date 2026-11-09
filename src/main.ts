@@ -1,5 +1,7 @@
 import { Plugin } from "obsidian";
 
+import { createChangeDetector } from "./editor/change-detector";
+import { TaskLifecycleEvents } from "./events/event-bus";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
 import { SettingsStore } from "./settings/settings";
 import { TaskLifecycleSettingTab } from "./settings/settings-tab";
@@ -11,6 +13,9 @@ export default class TaskLifecyclePlugin extends Plugin {
 	 */
 	settings!: SettingsStore;
 
+	/** The plugin's own event bus (`task-lifecycle:status-changed`). No public API. */
+	events = new TaskLifecycleEvents();
+
 	private disposeCheckboxIcons: (() => void) | null = null;
 
 	async onload(): Promise<void> {
@@ -21,6 +26,12 @@ export default class TaskLifecyclePlugin extends Plugin {
 		await this.settings.load();
 
 		this.disposeCheckboxIcons = bindCheckboxIcons(this.settings);
+		this.registerEditorExtension(
+			createChangeDetector({
+				events: this.events,
+				getSettings: () => this.settings.get(),
+			})
+		);
 		this.addSettingTab(new TaskLifecycleSettingTab(this.app, this, this.settings));
 	}
 
@@ -28,5 +39,6 @@ export default class TaskLifecyclePlugin extends Plugin {
 		this.disposeCheckboxIcons?.();
 		this.disposeCheckboxIcons = null;
 		this.settings?.clear();
+		this.events.clear();
 	}
 }
