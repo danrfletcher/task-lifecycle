@@ -1,0 +1,6 @@
+- [ ] Ship release ^rel1
+	- [ ] Write notes
+	- Notes
+		- [ ] Proofread
+	- [x] Tag build ✅ 2026-11-08
+- [ ] Book venue

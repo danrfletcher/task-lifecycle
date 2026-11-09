@@ -1,0 +1,2 @@
+tests/fixtures/crlf-note.md -text
+tests/fixtures/lifecycle-demo.md text eol=lf
