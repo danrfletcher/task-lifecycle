@@ -5,6 +5,7 @@ import { TaskLifecycleEvents } from "./events/event-bus";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
 import { SettingsStore } from "./settings/settings";
 import { TaskLifecycleSettingTab } from "./settings/settings-tab";
+import { wireCheckboxPress } from "./status-cycle/wire-checkbox-press";
 
 export default class TaskLifecyclePlugin extends Plugin {
 	/**
@@ -17,6 +18,7 @@ export default class TaskLifecyclePlugin extends Plugin {
 	events = new TaskLifecycleEvents();
 
 	private disposeCheckboxIcons: (() => void) | null = null;
+	private disposeCheckboxPress: (() => void) | null = null;
 
 	async onload(): Promise<void> {
 		this.settings = new SettingsStore({
@@ -32,10 +34,17 @@ export default class TaskLifecyclePlugin extends Plugin {
 				getSettings: () => this.settings.get(),
 			})
 		);
+		this.disposeCheckboxPress = wireCheckboxPress({
+			plugin: this,
+			app: this.app,
+			settings: this.settings,
+		});
 		this.addSettingTab(new TaskLifecycleSettingTab(this.app, this, this.settings));
 	}
 
 	onunload(): void {
+		this.disposeCheckboxPress?.();
+		this.disposeCheckboxPress = null;
 		this.disposeCheckboxIcons?.();
 		this.disposeCheckboxIcons = null;
 		this.settings?.clear();

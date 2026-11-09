@@ -79,7 +79,34 @@ export class PluginSettingTab {
 	hide(): void {}
 }
 
-export class App {}
+type WorkspaceHandler = (...args: unknown[]) => void;
+
+/** A stand-in for `app.workspace`: `on`/`trigger` and a settable list of markdown leaves. */
+export class MockWorkspace {
+	handlers = new Map<string, WorkspaceHandler[]>();
+	/** Leaves returned by `getLeavesOfType("markdown")`: `{ view: { contentEl, editor, file } }`. */
+	leaves: unknown[] = [];
+	on(name: string, handler: WorkspaceHandler): { name: string; handler: WorkspaceHandler } {
+		this.handlers.set(name, [...(this.handlers.get(name) ?? []), handler]);
+		return { name, handler };
+	}
+	offref(ref: { name: string; handler: WorkspaceHandler }): void {
+		this.handlers.set(
+			ref.name,
+			(this.handlers.get(ref.name) ?? []).filter((h) => h !== ref.handler)
+		);
+	}
+	getLeavesOfType(_type: string): unknown[] {
+		return this.leaves;
+	}
+	trigger(name: string, ...args: unknown[]): void {
+		for (const h of this.handlers.get(name) ?? []) h(...args);
+	}
+}
+
+export class App {
+	workspace = new MockWorkspace();
+}
 
 export class Plugin {
 	/** In-memory `data.json`. Tests set this before `onload()` and read it after. */
@@ -87,6 +114,10 @@ export class Plugin {
 	settingTabs: unknown[] = [];
 	addCommand = vi.fn();
 	editorExtensions: Extension[] = [];
+	/** Removers for everything registered through `registerDomEvent` / `registerEvent`. */
+	private cleanups: Array<() => void> = [];
+	/** How many DOM listeners are registered right now. */
+	domListenerCount = 0;
 	constructor(
 		public app: unknown = new App(),
 		public manifest: unknown = {}
@@ -103,4 +134,27 @@ export class Plugin {
 	addSettingTab(tab: unknown): void {
 		this.settingTabs.push(tab);
 	}
+	registerDomEvent(
+		el: EventTarget,
+		type: string,
+		callback: (evt: never) => unknown,
+		options?: boolean | AddEventListenerOptions
+	): void {
+		el.addEventListener(type, callback, options);
+		this.domListenerCount += 1;
+		this.cleanups.push(() => {
+			el.removeEventListener(type, callback, options);
+			this.domListenerCount -= 1;
+		});
+	}
+	registerEvent(ref: unknown): void {
+		const ws = (this.app as App).workspace;
+		this.cleanups.push(() => ws.offref(ref as never));
+	}
+	/** What Obsidian does when the plugin is disabled: `onunload`, then drop registrations. */
+	unload(): void {
+		this.onunload?.();
+		for (const cleanup of this.cleanups.splice(0)) cleanup();
+	}
+	onunload?(): void;
 }

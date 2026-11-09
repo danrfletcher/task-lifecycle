@@ -75,6 +75,22 @@ export function setCheckboxStatusChar(
 }
 
 /**
+ * The "[c]" token of a task line: `fromCh` is the index of "[" and `toCh`
+ * is one past the index of "]" (an exclusive upper bound). Null if the line
+ * is not a task line. Uses the same regex as `isTaskLine`, so `> - [ ]`,
+ * `> > 1) [x]` and the like have a token and `- [ ]x`, `- [ab]` and `-[ ]`
+ * do not.
+ */
+export function checkboxTokenRange(
+	line: string
+): { fromCh: number; toCh: number } | null {
+	const m = TASK_LINE_RE.exec(line);
+	if (!m) return null;
+	const fromCh = m[1].length - 1;
+	return { fromCh, toCh: fromCh + 1 + m[2].length + 1 };
+}
+
+/**
  * Leading whitespace columns of a line. A space is 1 column, a tab is 4.
  */
 export function indentWidth(line: string): number {
