@@ -51,4 +51,4 @@ npm run build
 
 ## Status
 
-Version 0.1.0 is the scaffold plus the pure domain helpers (line classifier, status sequence, stamps). The plugin does not change any behaviour yet; the settings tab, checkbox icons, change detector, click handling and cascade arrive in later releases.
+Version 0.1.0 has the scaffold, the pure domain helpers (line classifier, status sequence, stamps), the settings tab (four toggles, saved in `data.json`, applied without a reload) and the checkbox icons (static rules in `styles.css`, switched by the `task-lifecycle-checkboxes` body class). The plugin does not change any task text yet; the change detector, click handling and cascade arrive in later releases. The toggles for those features are stored and published to them already (`plugin.settings.subscribe((next, prev) => ...)`).
