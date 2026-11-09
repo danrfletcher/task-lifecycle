@@ -108,6 +108,104 @@ export class App {
 	workspace = new MockWorkspace();
 }
 
+type Decorated = HTMLElement;
+
+interface ElementOpts {
+	text?: string;
+	cls?: string;
+}
+
+/** Give a DOM element the helpers Obsidian adds to `HTMLElement`. */
+function decorate(el: HTMLElement): Decorated {
+	const createEl = (tag: string, opts?: ElementOpts): HTMLElement => {
+		const child = decorate(document.createElement(tag));
+		if (opts?.text !== undefined) child.textContent = opts.text;
+		if (opts?.cls) child.className = opts.cls;
+		el.appendChild(child);
+		return child;
+	};
+	return Object.assign(el, {
+		createEl,
+		createDiv: (opts?: ElementOpts) => createEl("div", opts),
+		setText: (text: string) => {
+			el.textContent = text;
+		},
+		empty: () => {
+			el.replaceChildren();
+		},
+	});
+}
+
+export interface MockKeyHandler {
+	modifiers: string[] | null;
+	key: string | null;
+	func: (evt: KeyboardEvent) => unknown;
+}
+
+/** `Scope`: `register` / `unregister`, and `press` to simulate a key. */
+export class Scope {
+	handlers: MockKeyHandler[] = [];
+	register(
+		modifiers: string[] | null,
+		key: string | null,
+		func: (evt: KeyboardEvent) => unknown
+	): MockKeyHandler {
+		const handler = { modifiers, key, func };
+		this.handlers.push(handler);
+		return handler;
+	}
+	unregister(handler: MockKeyHandler): void {
+		this.handlers = this.handlers.filter((h) => h !== handler);
+	}
+	/** Run the handlers for `key`; true if one handled it (returned false). */
+	press(key: string, evt: Partial<KeyboardEvent> = {}): boolean {
+		for (const h of [...this.handlers]) {
+			if (h.key === key && h.func({ key, ...evt } as KeyboardEvent) === false) return true;
+		}
+		return false;
+	}
+}
+
+/**
+ * `Modal` for tests that run under happy-dom: `open()` puts a
+ * `.modal-container` in the body, `close()` calls `onClose` and removes it.
+ * Escape and the close button are `close()`.
+ */
+export class Modal {
+	/** Every modal that is open right now. */
+	static openModals: Modal[] = [];
+	scope = new Scope();
+	containerEl!: Decorated;
+	modalEl!: Decorated;
+	titleEl!: Decorated;
+	contentEl!: Decorated;
+	isOpen = false;
+	constructor(public app: unknown) {
+		if (typeof document === "undefined") return;
+		this.containerEl = decorate(document.createElement("div"));
+		this.containerEl.className = "modal-container";
+		this.modalEl = this.containerEl.createDiv({ cls: "modal" });
+		this.titleEl = this.modalEl.createDiv({ cls: "modal-title" });
+		this.contentEl = this.modalEl.createDiv({ cls: "modal-content" });
+	}
+	open(): void {
+		if (this.isOpen) return;
+		this.isOpen = true;
+		Modal.openModals.push(this);
+		document.body.appendChild(this.containerEl);
+		this.onOpen();
+	}
+	close(): void {
+		if (!this.isOpen) return;
+		this.isOpen = false;
+		Modal.openModals = Modal.openModals.filter((m) => m !== this);
+		this.onClose();
+		this.containerEl.remove();
+	}
+	onOpen(): void {}
+	onClose(): void {}
+}
+
 export class Plugin {
 	/** In-memory `data.json`. Tests set this before `onload()` and read it after. */
 	dataFile: unknown = undefined;

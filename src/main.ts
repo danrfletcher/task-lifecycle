@@ -1,5 +1,6 @@
 import { Plugin } from "obsidian";
 
+import { wireCascade } from "./cascade/wire-cascade";
 import { createChangeDetector } from "./editor/change-detector";
 import { TaskLifecycleEvents } from "./events/event-bus";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
@@ -19,6 +20,7 @@ export default class TaskLifecyclePlugin extends Plugin {
 
 	private disposeCheckboxIcons: (() => void) | null = null;
 	private disposeCheckboxPress: (() => void) | null = null;
+	private disposeCascade: (() => void) | null = null;
 
 	async onload(): Promise<void> {
 		this.settings = new SettingsStore({
@@ -39,10 +41,18 @@ export default class TaskLifecyclePlugin extends Plugin {
 			app: this.app,
 			settings: this.settings,
 		});
+		this.disposeCascade = wireCascade({
+			plugin: this,
+			app: this.app,
+			settings: this.settings,
+			events: this.events,
+		});
 		this.addSettingTab(new TaskLifecycleSettingTab(this.app, this, this.settings));
 	}
 
 	onunload(): void {
+		this.disposeCascade?.();
+		this.disposeCascade = null;
 		this.disposeCheckboxPress?.();
 		this.disposeCheckboxPress = null;
 		this.disposeCheckboxIcons?.();

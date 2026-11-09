@@ -113,7 +113,7 @@ describe("fence regression checks", () => {
 	});
 
 	it("F5/F9: no agile: events, no document.dispatchEvent, no workspace.trigger, no <style in the new files", () => {
-		const added = srcFiles.filter((p) => /src\/(editor|events)\//.test(p) || /task-line-diff/.test(p));
+		const added = srcFiles.filter((p) => /src\/(editor|events|cascade)\//.test(p) || /task-line-diff|domain\/cascade/.test(p));
 		expect(added.length).toBeGreaterThanOrEqual(3);
 		expect(hits(added, /agile:|document\.dispatchEvent|dispatchEvent\(|workspace\.trigger|<style/i)).toEqual([]);
 	});
