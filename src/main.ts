@@ -22,12 +22,18 @@ export default class TaskLifecyclePlugin extends Plugin {
 	private disposeCheckboxPress: (() => void) | null = null;
 	private disposeCascade: (() => void) | null = null;
 
+	/** Set by `onunload`; stops an `onload` that is still awaiting from wiring anything. */
+	private unloaded = false;
+
 	async onload(): Promise<void> {
 		this.settings = new SettingsStore({
 			loadData: () => this.loadData(),
 			saveData: (data) => this.saveData(data),
 		});
 		await this.settings.load();
+		// Obsidian can unload the plugin while settings are still loading.
+		// Wire nothing then: it would never be disposed.
+		if (this.unloaded) return;
 
 		this.disposeCheckboxIcons = bindCheckboxIcons(this.settings);
 		this.registerEditorExtension(
@@ -51,6 +57,7 @@ export default class TaskLifecyclePlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.unloaded = true;
 		this.disposeCascade?.();
 		this.disposeCascade = null;
 		this.disposeCheckboxPress?.();

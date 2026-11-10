@@ -35,6 +35,14 @@
  * transaction is applied. A handler that needs to edit the note must not
  * dispatch right away: queue the work, then dispatch through the same view
  * with the `taskLifecycleSelfWrite` annotation.
+ *
+ * The close cascade (`cascade-service.ts`) is the one writer that does NOT
+ * annotate: it edits through Obsidian's `Editor.transaction`, which cannot
+ * carry a CodeMirror annotation. The detector therefore re-diffs the cascade's
+ * write and emits `status-changed` for each subtask it closed. That is safe
+ * because those events change nothing: the cascade already wrote the stamp
+ * (restamping is idempotent) and a closed subtask has no open subtasks left,
+ * so no dialog opens. Any new writer must annotate, not rely on this.
  */
 import {
 	Annotation,

@@ -1,8 +1,10 @@
 /**
  * Close stamps (pure).
  *
- * A stamp is the emoji, one space and a YYYY-MM-DD date, with a word boundary
- * after the date. A bare emoji with no date is never a stamp.
+ * A stamp is the emoji (optionally followed by the emoji presentation selector
+ * U+FE0F, as typed or pasted from some keyboards), one space and a YYYY-MM-DD
+ * date, with a word boundary after the date. A bare emoji with no date is
+ * never a stamp.
  */
 import { CANCELLED_EMOJI, DONE_EMOJI } from "./constants";
 import { toYyyyMmDd } from "./dates";
@@ -17,7 +19,7 @@ export interface Stamp {
 	date: string;
 	/** Index of the emoji in the line. */
 	index: number;
-	/** Length of the stamp text (emoji, space, date). */
+	/** Length of the stamp text (emoji, optional U+FE0F, space, date). */
 	length: number;
 }
 
@@ -31,7 +33,7 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Source of the stamp pattern. Built per call because the regex is global. */
 function stampRegex(): RegExp {
 	return new RegExp(
-		`(${DONE_EMOJI}|${CANCELLED_EMOJI}) (\\d{4}-\\d{2}-\\d{2})\\b`,
+		`(${DONE_EMOJI}|${CANCELLED_EMOJI})\\uFE0F? (\\d{4}-\\d{2}-\\d{2})\\b`,
 		"g"
 	);
 }
@@ -53,16 +55,20 @@ export function findStamps(line: string): Stamp[] {
 }
 
 /**
- * Remove every stamp, each together with the single space before it.
- * Nothing else on the line changes.
+ * Remove every stamp, each together with all the spaces and tabs directly
+ * before it, so removing a stamp never leaves trailing whitespace behind
+ * ("a   ✅ 2026-11-01" becomes "a"). Text that follows a stamp keeps its own
+ * leading whitespace ("a   ✅ 2026-11-01 ^id" becomes "a ^id"). Nothing else on
+ * the line changes.
  */
 export function removeStamps(line: string): string {
 	const stamps = findStamps(line);
 	let out = "";
 	let pos = 0;
 	for (const s of stamps) {
-		const spaceBefore = s.index > pos && line[s.index - 1] === " ";
-		out += line.slice(pos, spaceBefore ? s.index - 1 : s.index);
+		let end = s.index;
+		while (end > pos && (line[end - 1] === " " || line[end - 1] === "\t")) end--;
+		out += line.slice(pos, end);
 		pos = s.index + s.length;
 	}
 	return out + line.slice(pos);

@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const root = join(__dirname, "..", "..");
 
@@ -15,21 +16,38 @@ function files(dir: string): string[] {
 	return out;
 }
 
+const rootMain = join(root, "main.js");
+const rootMainBefore = existsSync(rootMain) ? readFileSync(rootMain, "utf8") : null;
+
 let main = "";
+let outDir = "";
+let outfile = "";
 
 beforeAll(() => {
-	// Build the shipped bundle the same way `npm run build` does.
-	execFileSync(process.execPath, [join(root, "esbuild.config.mjs"), "production"], {
+	// Build the shipped bundle the way `npm run build` does, but into a
+	// temporary file so the test never overwrites a dev/watch main.js.
+	outDir = mkdtempSync(join(tmpdir(), "task-lifecycle-build-"));
+	outfile = join(outDir, "main.js");
+	execFileSync(process.execPath, [join(root, "esbuild.config.mjs"), "production", outfile], {
 		cwd: root,
 		stdio: "pipe",
 	});
-	main = readFileSync(join(root, "main.js"), "utf8");
+	main = readFileSync(outfile, "utf8");
 }, 60_000);
+
+afterAll(() => {
+	if (outDir) rmSync(outDir, { recursive: true, force: true });
+});
 
 describe("F9: no runtime style injection in the built main.js", () => {
 	it("main.js was built and is not empty", () => {
-		expect(existsSync(join(root, "main.js"))).toBe(true);
+		expect(existsSync(outfile)).toBe(true);
 		expect(main.length).toBeGreaterThan(100);
+	});
+
+	it("building for the test leaves the worktree's own main.js alone", () => {
+		const after = existsSync(rootMain) ? readFileSync(rootMain, "utf8") : null;
+		expect(after).toBe(rootMainBefore);
 	});
 
 	const banned: Array<[string, RegExp]> = [

@@ -1,6 +1,6 @@
 /**
  * Minimal runtime stand-in for the `obsidian` module, wired in through the
- * alias in vitest.config.ts. The real package ships types only.
+ * alias in vitest.config.mts. The real package ships types only.
  */
 import { StateField, type Extension } from "@codemirror/state";
 import { vi } from "vitest";

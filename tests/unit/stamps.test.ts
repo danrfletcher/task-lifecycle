@@ -65,8 +65,33 @@ describe("removeStamps", () => {
 		expect(removeStamps("✅ 2026-11-01 a")).toBe(" a");
 	});
 
-	it("takes only one of several spaces before the stamp", () => {
-		expect(removeStamps("a   ✅ 2026-11-01 ^id")).toBe("a   ^id");
+	it("takes every space and tab before the stamp, so none is left trailing", () => {
+		expect(removeStamps("a   ✅ 2026-11-01 ^id")).toBe("a ^id");
+		expect(removeStamps("- [x] a   ✅ 2026-11-01")).toBe("- [x] a");
+		expect(removeStamps("- [x] a \t ✅ 2026-11-01")).toBe("- [x] a");
+	});
+
+	it("keeps the whitespace of the text after the stamp", () => {
+		expect(removeStamps("a   ✅ 2026-11-01   b")).toBe("a   b");
+	});
+
+	it("finds and removes a stamp typed with the emoji presentation selector (U+FE0F)", () => {
+		expect(findStamps("- [x] a ✅\uFE0F 2026-11-01")).toEqual([
+			{ kind: "done", date: "2026-11-01", index: 8, length: 13 },
+		]);
+		expect(findStamps("- [-] a ❌\uFE0F 2026-11-01")[0]).toMatchObject({ kind: "cancelled" });
+		expect(removeStamps("- [x] a ✅\uFE0F 2026-11-01 ^id")).toBe("- [x] a ^id");
+		expect(removeStamps("- [x] a ❌\uFE0F 2026-11-01")).toBe("- [x] a");
+	});
+
+	it("reopening or re-closing a task with a U+FE0F stamp leaves exactly one stamp", () => {
+		const line = "- [x] a ✅\uFE0F 2026-11-01 ^id";
+		expect(applyStampTransition(line, "x", " ", TODAY)).toBe("- [ ] a ^id".replace("[ ]", "[x]"));
+		expect(applyStampTransition(line, "x", "-", TODAY)).toBe("- [x] a ❌ 2026-11-09 ^id");
+	});
+
+	it("still treats a bare emoji with a selector and no date as no stamp", () => {
+		expect(findStamps("- [x] a ✅\uFE0F")).toEqual([]);
 	});
 
 	it("leaves a line with no stamp untouched, trailing spaces included", () => {
@@ -559,7 +584,7 @@ function rng(seed: number) {
 }
 
 describe("applyStampTransition: property (F4)", () => {
-	const stampToken = / ?(?:✅|❌) \d{4}-\d{2}-\d{2}\b/g;
+	const stampToken = /[ \t]*(?:✅|❌)\uFE0F? \d{4}-\d{2}-\d{2}\b/g;
 	/** Drop stamp tokens, then the whitespace run right before the end or a trailing block id. */
 	const canon = (s: string) =>
 		s.replace(stampToken, "").replace(/\s+(?=(?:\^[A-Za-z0-9-]+\s*)?$)/, "");

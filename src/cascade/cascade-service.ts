@@ -19,9 +19,13 @@
  * and the second dialog replaces the first (which closes as "Leave open").
  *
  * The cascade's own edit is seen by the change detector like any other editor
- * change. Its stamp edit for those lines changes nothing (the cascade already
- * wrote the same stamp), and the subtasks it closed have no open subtasks
- * left, so the events it causes never open a dialog.
+ * change: it is not annotated `taskLifecycleSelfWrite`, because it goes
+ * through Obsidian's `Editor.transaction`, which takes no CodeMirror
+ * annotation. Its stamp edit for those lines changes nothing (the cascade
+ * already wrote the same stamp), and the subtasks it closed have no open
+ * subtasks left, so the events it causes never open a dialog. They are
+ * stopped by the dedupe map or by the zero-count check; this relies on both
+ * staying true. The map entries expire after `CASCADE_DEDUPE_MS`.
  *
  * Nothing is edited unless the dialog resolves "close" and the parent line
  * is still found, closed, and the setting is still on.
