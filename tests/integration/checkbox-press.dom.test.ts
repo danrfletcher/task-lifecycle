@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+// (happy-dom, not jsdom: it is the DOM environment already in package.json.)
 /**
  * The press handler through the real code path: a real `TaskLifecyclePlugin`
  * (so the real wiring, settings store and change detector), real DOM events

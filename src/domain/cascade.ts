@@ -11,7 +11,11 @@
  * block ends at the first other line indented at or shallower than the parent.
  * Indent is measured in columns before the list marker: a space is 1, a tab is
  * 4 and each blockquote ">" is 1, so `> - [ ]` and `>   - [ ]` compare like
- * `- [ ]` and `  - [ ]`.
+ * `- [ ]` and `  - [ ]`. A line with more blockquote markers than the parent
+ * opens a nested quote, which belongs to the parent's item only if it is
+ * indented deeper than the parent's marker: `- [x] p` then `> - [ ] q` (the
+ * quote starts at the margin and ends the list) is not a subtask, while
+ * `- [x] p` then `  > - [ ] q` is.
  *
  * Open-status rule: a task is closed only if its status char is "x", "X" or
  * "-". Every other char is open, whatever stamps are on the line.
@@ -52,6 +56,26 @@ function measure(line: string): { columns: number; depth: number } {
 	return { columns, depth };
 }
 
+/**
+ * Columns of whitespace right after the `n`-th blockquote marker (after the
+ * line start for n = 0), up to the next marker or text. This is the indent of
+ * whatever sits at quote level `n`.
+ */
+function indentAtQuoteLevel(line: string, n: number): number {
+	const prefix = PREFIX_RE.exec(line)?.[0] ?? "";
+	let seen = 0;
+	let columns = 0;
+	for (const ch of prefix) {
+		if (ch === ">") {
+			if (seen > n) break;
+			seen += 1;
+			continue;
+		}
+		if (seen === n) columns += ch === "\t" ? 4 : 1;
+	}
+	return columns;
+}
+
 const BLANK_RE = /^[ \t>\r]*$/;
 
 /**
@@ -76,6 +100,13 @@ export function collectDescendantIndices(
 		if (BLANK_RE.test(line)) continue;
 		const here = measure(line);
 		if (here.depth < parent.depth || here.columns <= parent.columns) break;
+		// A deeper quote must itself be indented past the parent's marker.
+		if (
+			here.depth > parent.depth &&
+			indentAtQuoteLevel(line, parent.depth) <= indentAtQuoteLevel(lines[parentLine0], parent.depth)
+		) {
+			break;
+		}
 		if (info[i].kind !== "other") out.push(i);
 	}
 	return out;

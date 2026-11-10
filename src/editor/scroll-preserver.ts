@@ -87,43 +87,67 @@ export function captureEditorScroll(editor: Editor): ScrollSnapshot {
 	return snap;
 }
 
-function restoreNow(snap: ScrollSnapshot): void {
+/** What `restoreNow` left behind, so a later frame can tell a layout shift from a user scroll. */
+interface Applied {
+	/** `scrollTop` after the restore. */
+	scrollTop: number;
+	/** The anchor line's top at that moment; null when there is no anchor to compare. */
+	blockTop: number | null;
+}
+
+/**
+ * Put the scroll position back. With `previous` (a later frame), do nothing
+ * and return null if the user scrolled since: the scroller moved but the
+ * anchor line did not (a layout shift moves the anchor line, a user scroll
+ * moves only `scrollTop`).
+ */
+function restoreNow(snap: ScrollSnapshot, previous?: Applied): Applied | null {
 	const { el, view, anchorLine, anchorTop, scrollTop, top, left } = snap;
-	if (!el) return;
+	if (!el) return null;
+	const plain = (): Applied => {
+		el.scrollTop = top;
+		el.scrollLeft = left;
+		return { scrollTop: el.scrollTop, blockTop: null };
+	};
 	try {
 		const doc = view?.state?.doc;
-		if (!view?.lineBlockAt || !doc || anchorLine == null || anchorTop == null) {
-			el.scrollTop = top;
-			el.scrollLeft = left;
-			return;
-		}
+		if (!view?.lineBlockAt || !doc || anchorLine == null || anchorTop == null) return plain();
 		const line = doc.line(Math.min(Math.max(0, anchorLine), doc.lines - 1) + 1);
 		const blockNow = view.lineBlockAt(line.from);
-		if (!blockNow || typeof blockNow.top !== "number") {
-			el.scrollTop = top;
-			el.scrollLeft = left;
-			return;
+		if (!blockNow || typeof blockNow.top !== "number") return plain();
+		if (
+			previous &&
+			previous.blockTop !== null &&
+			el.scrollTop !== previous.scrollTop &&
+			blockNow.top === previous.blockTop
+		) {
+			return null;
 		}
 		el.scrollTop = (scrollTop ?? top) + (blockNow.top - anchorTop);
 		el.scrollLeft = left;
+		return { scrollTop: el.scrollTop, blockTop: blockNow.top };
 	} catch {
-		el.scrollTop = top;
-		el.scrollLeft = left;
+		return plain();
 	}
 }
 
 /**
  * Put the scroll position back now and again on the next two animation
- * frames (Live Preview re-lays out after a write and can move it later).
+ * frames (Live Preview re-lays out after a write and can move it later). A
+ * later frame stops at once if the user scrolled in between (see
+ * `restoreNow`), so a scroll started right after a click is not snapped back.
  */
 export function restoreEditorScrollLater(snap: ScrollSnapshot): void {
-	restoreNow(snap);
+	let applied = restoreNow(snap);
 	const raf = (
 		globalThis as { requestAnimationFrame?: (cb: () => void) => number }
 	).requestAnimationFrame;
-	if (typeof raf !== "function") return;
-	raf(() => {
-		restoreNow(snap);
-		raf(() => restoreNow(snap));
-	});
+	if (typeof raf !== "function" || applied === null) return;
+	const again = (next?: () => void) => () => {
+		const result = restoreNow(snap, applied ?? undefined);
+		if (result === null) return;
+		applied = result;
+		next?.();
+	};
+	raf(again(() => raf(again())));
 }

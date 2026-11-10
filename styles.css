@@ -25,7 +25,9 @@ body.task-lifecycle-checkboxes.theme-light {
 
 /* Glyph and colour per status */
 
-/* [X] done */
+/* [X] done. Only the icon token is set: like the source theme, the glyph rules
+   below are narrowed to [-] and [/], so [X] keeps the theme's checked box and
+   no ✔️ is drawn. (Open question for Dan: should [X] get the glyph?) */
 body.task-lifecycle-checkboxes [data-task="X"] {
 	--task-icon: "✔️";
 	--task-fg: var(--text-accent, var(--accent));

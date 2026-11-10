@@ -15,7 +15,7 @@ export default defineConfig([
 
   // 2. Project-specific TS config
   {
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.mts"],
 
     languageOptions: {
       parser: tsParser,
@@ -80,7 +80,7 @@ export default defineConfig([
 
   // Tests run in Node and may read files from disk.
   {
-    files: ["tests/**/*.ts", "vitest.config.ts"],
+    files: ["tests/**/*.ts", "vitest.config.mts"],
     rules: {
       "import/no-nodejs-modules": "off",
     },

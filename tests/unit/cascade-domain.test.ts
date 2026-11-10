@@ -124,6 +124,30 @@ describe("collectDescendantIndices: the subtask rule", () => {
 			want: [1],
 		},
 		{
+			name: "a margin-level quote after a list parent is not part of the item",
+			lines: ["- [x] p", "> - [ ] quoted"],
+			parent: 0,
+			want: [],
+		},
+		{
+			name: "a quote indented past the parent's marker is part of the item",
+			lines: ["- [x] p", "  > - [ ] quoted", "> - [ ] margin quote"],
+			parent: 0,
+			want: [1],
+		},
+		{
+			name: "a nested quote at the parent's own indent inside a quote ends the block",
+			lines: ["> - [x] p", "> > - [ ] nested"],
+			parent: 0,
+			want: [],
+		},
+		{
+			name: "a nested quote indented past the parent's marker inside a quote is part of the item",
+			lines: ["> - [x] p", ">   > - [ ] nested"],
+			parent: 0,
+			want: [1],
+		},
+		{
 			name: "a bare '>' line is blank",
 			lines: ["> - [x] p", ">", ">   - [ ] child"],
 			parent: 0,

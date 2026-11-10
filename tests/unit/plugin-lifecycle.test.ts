@@ -105,4 +105,17 @@ describe("plugin lifecycle (settings part)", () => {
 		const plugin = makePlugin();
 		expect(() => plugin.onunload()).not.toThrow();
 	});
+
+	it("unload while settings are still loading wires nothing afterwards", async () => {
+		const plugin = makePlugin();
+		const loading = plugin.onload(); // parked on `await settings.load()`
+		plugin.onunload();
+		await loading;
+
+		expect(has()).toBe(false);
+		expect(plugin.settingTabs).toHaveLength(0);
+		// Nothing subscribed: a settings change reaches no listener and no icons class appears.
+		await plugin.settings.update({ checkboxIcons: true });
+		expect(has()).toBe(false);
+	});
 });

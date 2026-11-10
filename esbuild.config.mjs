@@ -9,6 +9,9 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = process.argv[2] === "production";
+// Optional third argument: where to write the bundle (default main.js). The
+// build test uses it so it never overwrites a dev/watch build of main.js.
+const outfile = process.argv[3] ?? "main.js";
 
 const context = await esbuild.context({
 	banner: { js: banner },
@@ -35,7 +38,7 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outfile,
 	minify: prod,
 });
 
