@@ -1,0 +1,9 @@
+{
+	"id": "task-lifecycle",
+	"name": "Task Lifecycle",
+	"version": "0.1.0",
+	"minAppVersion": "1.5.0",
+	"description": "Status cycle, close stamps and close cascade for Markdown task lines.",
+	"author": "danrfletcher",
+	"isDesktopOnly": false
+}

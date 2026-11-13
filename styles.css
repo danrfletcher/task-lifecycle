@@ -1,0 +1,181 @@
+/* Task Lifecycle checkbox icons.
+
+   Shipped as static CSS; the plugin never injects styles at runtime. Every rule
+   is scoped under body.task-lifecycle-checkboxes, which the "Checkbox icons"
+   setting adds and removes. With the class absent, the theme's own look applies.
+
+   Only the statuses the plugin cycles through are styled:
+   [-] cancelled, [/] in progress, [x] / [X] done. [ ] is never touched. */
+
+body.task-lifecycle-checkboxes {
+	--task-icon: "";
+	--task-fg: currentColor;
+	--task-size: 1em; /* icon size */
+	--task-offset-y: 0.1em; /* vertical nudge */
+}
+
+/* Dim colour used by [-] */
+body.task-lifecycle-checkboxes.theme-dark {
+	--col-d: #3e4552;
+}
+
+body.task-lifecycle-checkboxes.theme-light {
+	--col-d: #cad3eb;
+}
+
+/* Glyph and colour per status */
+
+/* [X] done. Only the icon token is set: like the source theme, the glyph rules
+   below are narrowed to [-] and [/], so [X] keeps the theme's checked box and
+   no ✔️ is drawn. (Open question for Dan: should [X] get the glyph?) */
+body.task-lifecycle-checkboxes [data-task="X"] {
+	--task-icon: "✔️";
+	--task-fg: var(--text-accent, var(--accent));
+}
+
+/* [-] cancelled */
+body.task-lifecycle-checkboxes [data-task="-"] {
+	--task-icon: "❌";
+	--task-fg: var(--col-d);
+}
+
+/* [/] in progress */
+body.task-lifecycle-checkboxes [data-task="/"] {
+	--task-icon: "⛛";
+	--task-fg: var(--text-accent, var(--accent));
+}
+
+/* Draw the glyph in place of the checkbox for [-] and [/] (editor, legacy
+   editor tokens, and rendered list items) */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.task-list-item-checkbox:is([data-task="-"], [data-task="/"])::before,
+body.task-lifecycle-checkboxes
+	.cm-s-obsidian
+	span.hmd-hidden-token.cm-formatting-task:is(
+		[data-task="-"],
+		[data-task="/"]
+	)::before,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> input[type="checkbox"]::before,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> p
+	> input[type="checkbox"]::before {
+	content: var(--task-icon);
+	display: inline-block;
+	color: var(--task-fg);
+	font-size: var(--task-size);
+	line-height: 1;
+	transform: translateY(var(--task-offset-y));
+	margin-right: 0.15em;
+}
+
+/* Remove the native box so only the glyph shows */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.task-list-item-checkbox:is([data-task="-"], [data-task="/"]),
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> input[type="checkbox"],
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> p
+	> input[type="checkbox"] {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 1em;
+	height: 1em;
+	margin-right: 0.25em;
+	position: relative;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
+
+/* No box reappears on interactive states */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.task-list-item-checkbox:is([data-task="-"], [data-task="/"]):is(
+		:hover,
+		:focus,
+		:active,
+		:checked
+	),
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> input[type="checkbox"]:is(:hover, :focus, :active, :checked),
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> p
+	> input[type="checkbox"]:is(:hover, :focus, :active, :checked) {
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
+
+/* Centre the glyph in the (now box-less) checkbox */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.task-list-item-checkbox:is([data-task="-"], [data-task="/"])::before,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> input[type="checkbox"]::before,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> p
+	> input[type="checkbox"]::before {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	margin: 0;
+}
+
+/* Hide the theme's masked check layer for [-] and [/] */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.task-list-item-checkbox:is([data-task="-"], [data-task="/"]):checked::after,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> input[type="checkbox"]:checked::after,
+body.task-lifecycle-checkboxes
+	li:is([data-task="-"], [data-task="/"])
+	> p
+	> input[type="checkbox"]:checked::after {
+	content: none !important;
+	-webkit-mask-image: none !important;
+	background: none !important;
+}
+
+/* Obsidian strikes through every non-space status. Keep the strike for [x]
+   and [-] only, so [/] is not struck through. */
+body.task-lifecycle-checkboxes
+	.markdown-source-view.mod-cm6
+	.HyperMD-task-line[data-task]:not([data-task=" "]):not([data-task="x"]):not(
+		[data-task="-"]
+	),
+body.task-lifecycle-checkboxes
+	.task-list-item.is-checked:not([data-task="x"]):not([data-task="-"]) {
+	text-decoration: none !important;
+}
+
+/* [x] done: bold */
+body.task-lifecycle-checkboxes .HyperMD-task-line[data-task="x"],
+body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="x"] {
+	font-weight: 600;
+}
+
+/* [-] cancelled: struck through and dimmed */
+body.task-lifecycle-checkboxes .HyperMD-task-line[data-task="-"],
+body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
+	color: var(--lines, var(--text-faint));
+	text-decoration: line-through !important;
+	text-decoration-thickness: inherit;
+	text-decoration-color: currentColor;
+	opacity: 0.8;
+	font-weight: inherit;
+}
