@@ -26,6 +26,24 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+describe("plugin.resolveRenderedTask (the console entry point)", () => {
+	it("is a read-only method, and adds no command", async () => {
+		const plugin = makePlugin();
+		await plugin.onload();
+		const box = document.createElement("input");
+		box.type = "checkbox";
+		box.className = "task-list-item-checkbox";
+		document.body.append(box);
+		// Outside every Markdown view and embed: not our surface, and no throw.
+		await expect(plugin.resolveRenderedTask(box)).resolves.toEqual({
+			notIntercepted: "editor-checkbox",
+		});
+		const { addCommand } = plugin as unknown as { addCommand: ReturnType<typeof vi.fn> };
+		expect(addCommand).not.toHaveBeenCalled();
+		box.remove();
+	});
+});
+
 describe("plugin lifecycle (settings part)", () => {
 	it("fresh vault: all four on, class set, one settings tab, no commands", async () => {
 		const plugin = makePlugin();

@@ -104,8 +104,83 @@ export class MockWorkspace {
 	}
 }
 
+/** A `TFile` stand-in: the fields the plugin reads. */
+export class MockTFile {
+	name: string;
+	basename: string;
+	extension: string;
+	constructor(public path: string) {
+		this.name = path.slice(path.lastIndexOf("/") + 1);
+		const dot = this.name.lastIndexOf(".");
+		this.extension = dot >= 0 ? this.name.slice(dot + 1) : "";
+		this.basename = dot >= 0 ? this.name.slice(0, dot) : this.name;
+	}
+}
+
+/**
+ * A stand-in for `app.vault` with in-memory file text. Every write call is
+ * recorded in `writes` (and does nothing else), so a test can prove that a
+ * read-only module never wrote.
+ */
+export class MockVault {
+	/** path -> file text. */
+	texts = new Map<string, string>();
+	files = new Map<string, MockTFile>();
+	/** Paths that make `cachedRead` reject, as a file deleted behind the cache would. */
+	unreadable = new Set<string>();
+	/** One entry per write call, e.g. `process:Course.md`. */
+	writes: string[] = [];
+	reads = 0;
+	getAbstractFileByPath(path: string): MockTFile | null {
+		return this.files.get(path) ?? null;
+	}
+	async cachedRead(file: MockTFile): Promise<string> {
+		this.reads += 1;
+		const text = this.texts.get(file.path);
+		if (text === undefined || this.unreadable.has(file.path)) throw new Error("ENOENT");
+		return text;
+	}
+	async process(file: MockTFile): Promise<string> {
+		this.writes.push(`process:${file.path}`);
+		return this.texts.get(file.path) ?? "";
+	}
+	async modify(file: MockTFile): Promise<void> {
+		this.writes.push(`modify:${file.path}`);
+	}
+}
+
+/** A stand-in for `app.metadataCache`, with hand-built per-file caches. */
+export class MockMetadataCache {
+	/** path -> the cache the test built by hand (`headings`, `blocks`, `listItems`, ...). */
+	caches = new Map<string, unknown>();
+	constructor(private vault: MockVault) {}
+	getFileCache(file: MockTFile): unknown {
+		return this.caches.get(file.path) ?? null;
+	}
+	/** Like Obsidian: a path, a path without `.md`, or a bare name. */
+	getFirstLinkpathDest(linkpath: string, _sourcePath: string): MockTFile | null {
+		for (const f of this.vault.files.values()) {
+			if (f.path === linkpath || f.path === `${linkpath}.md`) return f;
+		}
+		for (const f of this.vault.files.values()) {
+			if (f.name === linkpath || f.basename === linkpath) return f;
+		}
+		return null;
+	}
+}
+
 export class App {
 	workspace = new MockWorkspace();
+	vault = new MockVault();
+	metadataCache = new MockMetadataCache(this.vault);
+	/** Add a note to the mock vault, with the metadata cache a test built by hand for it. */
+	addNote(path: string, text: string, cache?: unknown): MockTFile {
+		const file = new MockTFile(path);
+		this.vault.files.set(path, file);
+		this.vault.texts.set(path, text);
+		if (cache !== undefined) this.metadataCache.caches.set(path, cache);
+		return file;
+	}
 }
 
 type Decorated = HTMLElement;

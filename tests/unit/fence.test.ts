@@ -53,6 +53,48 @@ describe("domain purity", () => {
 	});
 });
 
+describe("rendered-task resolver (src/rendered, rendered-match, embed-range)", () => {
+	const renderedFiles = files(join(root, "src", "rendered"));
+	const readOnlyFiles = [
+		...renderedFiles,
+		join(root, "src", "domain", "rendered-match.ts"),
+		join(root, "src", "domain", "embed-range.ts"),
+	];
+
+	it("the files exist, so the greps below are not vacuous", () => {
+		expect(renderedFiles.length).toBeGreaterThanOrEqual(1);
+		expect(readOnlyFiles.length).toBeGreaterThanOrEqual(3);
+		for (const p of readOnlyFiles) expect(read(p).length).toBeGreaterThan(0);
+	});
+
+	it("F3: no vault, editor or file write call in the resolver, the probe code or the matcher", () => {
+		expect(
+			hits(
+				readOnlyFiles,
+				/vault\.(?:process|modify|create|append|delete|rename|trash)|fileManager\.|editor\.(?:replaceRange|replaceSelection|transaction|setValue|setLine)|\.replaceRange\(|\.transaction\(|\.dispatch\(/
+			)
+		).toEqual([]);
+	});
+
+	it("F9: no listener and no event interference in src/rendered, so the native toggle is untouched", () => {
+		expect(
+			hits(
+				renderedFiles,
+				/addEventListener|removeEventListener|registerDomEvent|registerEvent|\.on\(|\bonclick\b|\bonpointerdown\b|\bonkeydown\b|preventDefault|stopPropagation|stopImmediatePropagation|dispatchEvent/
+			)
+		).toEqual([]);
+	});
+
+	it("only type imports from obsidian, so the resolver pulls in no runtime code", () => {
+		const valueImport = /import\s+(?!type\b)[^;]*from\s+["']obsidian["']/;
+		expect(hits(renderedFiles, valueImport)).toEqual([]);
+	});
+
+	it("registers no command and no hotkey (F2)", () => {
+		expect(hits(renderedFiles, /addCommand|hotkeys|addRibbonIcon|addSettingTab/)).toEqual([]);
+	});
+});
+
 describe("fence regression checks", () => {
 	it("F1: no dashboard, task index or date-marker parsing in src", () => {
 		expect(hits(srcFiles, /📅|🛫|⏳|🎯|TaskItem|task-index/)).toEqual([]);
@@ -103,13 +145,24 @@ describe("fence regression checks", () => {
 		expect(constants.CASCADE_DEDUPE_MS).toBe(1500);
 	});
 
-	it("F2: no vault modify handling, no vault writes, no task index, no headless path in src", () => {
+	it("F1: no vault-wide watcher anywhere in src (vault, metadata cache or file-event listeners)", () => {
 		expect(
 			hits(
 				srcFiles,
-				/vault\.on\(\s*["']modify["']|vault\.modify|vault\.process|vault\.append|metadataCache|modifyHeadless|onStatusChanged/
+				/vault\.on\(|metadataCache\.on\(|\.on\(\s*["'](?:modify|create|delete|rename|changed|resolve|resolved)["']|FileSystemWatcher|onExternalSettingsChange/
 			)
 		).toEqual([]);
+	});
+
+	it("F2: no vault writes, no task index and no headless path in src", () => {
+		expect(
+			hits(srcFiles, /vault\.modify|vault\.process|vault\.append|modifyHeadless|onStatusChanged/)
+		).toEqual([]);
+	});
+
+	it("F2: the metadata cache is read only under src/rendered", () => {
+		const outside = srcFiles.filter((p) => !/src\/rendered\//.test(p));
+		expect(hits(outside, /metadataCache/)).toEqual([]);
 	});
 
 	it("F5/F9: no agile: events, no document.dispatchEvent, no workspace.trigger, no <style in the new files", () => {

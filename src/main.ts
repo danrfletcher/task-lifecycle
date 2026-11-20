@@ -3,6 +3,7 @@ import { Plugin } from "obsidian";
 import { wireCascade } from "./cascade/wire-cascade";
 import { createChangeDetector } from "./editor/change-detector";
 import { TaskLifecycleEvents } from "./events/event-bus";
+import { resolveRenderedTask, type RenderedTaskResult } from "./rendered/resolve-rendered-task";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
 import { SettingsStore } from "./settings/settings";
 import { TaskLifecycleSettingTab } from "./settings/settings-tab";
@@ -17,6 +18,14 @@ export default class TaskLifecyclePlugin extends Plugin {
 
 	/** The plugin's own event bus (`task-lifecycle:status-changed`). No public API. */
 	events = new TaskLifecycleEvents();
+
+	/**
+	 * Read-only: where a rendered task checkbox (in an embed or Reading view)
+	 * is in its source note. For the dev console and for later features. It
+	 * writes nothing and adds no command, hotkey or listener.
+	 */
+	resolveRenderedTask = (checkbox: Element): Promise<RenderedTaskResult> =>
+		resolveRenderedTask(this.app, checkbox);
 
 	private disposeCheckboxIcons: (() => void) | null = null;
 	private disposeCheckboxPress: (() => void) | null = null;
