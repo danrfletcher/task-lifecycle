@@ -1141,8 +1141,8 @@ describe("unload", () => {
 	it("removes every DOM listener and workspace handler, and clears a pending timer", async () => {
 		rig = await setup([["- [ ] a"]]);
 		const v = rig.views[0];
-		// 6 for the editor press handler, 6 for the embed press handler (five pointer/click, one keydown).
-		expect(rig.plugin.domListenerCount).toBe(12);
+		// 6 for the editor press handler, 7 for the embed press handler (four pointer, click, contextmenu, keydown).
+		expect(rig.plugin.domListenerCount).toBe(13);
 		pointer("pointerdown", v.checkbox(0), at(0, 3));
 		expect(vi.getTimerCount()).toBe(1);
 

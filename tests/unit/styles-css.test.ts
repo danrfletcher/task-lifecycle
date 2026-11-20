@@ -148,4 +148,17 @@ describe("styles.css", () => {
 	it("does not use the old data attribute gate", () => {
 		expect(css).not.toMatch(/\[data-[a-z-]*styles/);
 	});
+
+	it("turns off the touch callout and text selection on a rendered checkbox (G2), scoped like the other rules", () => {
+		const rule = rules.find((r) => /-webkit-touch-callout:\s*none/.test(r.body));
+		expect(rule).toBeDefined();
+		expect(rule?.body).toMatch(/(?:^|[\s;])user-select:\s*none/);
+		expect(rule?.body).toMatch(/-webkit-user-select:\s*none/);
+		// The checkbox of an embed and of a preview (Reading) view, nothing wider.
+		expect(rule?.selectors).toEqual([
+			`${SCOPE} .internal-embed input.task-list-item-checkbox`,
+			`${SCOPE} .markdown-embed input.task-list-item-checkbox`,
+			`${SCOPE} .markdown-preview-view input.task-list-item-checkbox`,
+		]);
+	});
 });

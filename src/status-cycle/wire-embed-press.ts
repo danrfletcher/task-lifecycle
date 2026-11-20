@@ -15,9 +15,16 @@
  *    every case below, and the write happens afterwards, awaited;
  *  - a click that follows a pointer press on the same box is a short click
  *    when `PressController` says so (released before 500 ms, moved at most
- *    5 px). A hold of 500 ms or more, or a drag, only suppresses the native
- *    toggle: cancel by long press and touch handling are not part of this
- *    file;
+ *    5 px). A drag only suppresses the native toggle;
+ *  - a hold of 500 ms or more without moving more than 5 px cancels the task
+ *    (`-`) once, as soon as the time is up and before the release (G3). The
+ *    release, and the click that follows it within 600 ms, are swallowed, and
+ *    the platform's long-press `contextmenu` is prevented during the press
+ *    and in those 600 ms. A hold cancels even with "Status cycle" off;
+ *  - touch is the same code path as the mouse (G2): a clean tap is a short
+ *    click, a hold is a cancel, a move over 5 px, a `pointercancel` (the
+ *    browser took a scroll) or a second finger (`isPrimary` false) ends the
+ *    press and writes nothing;
  *  - a click with `detail` 0 and no pointer press is a keyboard click: a
  *    short click, once. A click with `detail` > 0 and no press on this box
  *    (a drag that ended here) is only suppressed;
@@ -30,15 +37,18 @@
  * chevrons, bullets and the `li` padding keep their native behaviour.
  *
  * Every listener goes through `plugin.registerDomEvent`, so unloading the
- * plugin removes them. There is no timer: the hold is measured from the
- * clock at release.
+ * plugin removes them. The one timer is the hold timer: the returned stop
+ * function clears it. A short click is measured from the clock at release,
+ * not by the timer.
  *
- * With "Status cycle" off nothing here acts and the native toggle stays.
+ * With "Status cycle" off a short click and Enter are left to the native
+ * toggle (the plain toggle is the settings PR's job), but a hold still
+ * cancels and the click after it is still swallowed.
  */
 import type { Plugin } from "obsidian";
 
 import { CLICK_SWALLOW_MS } from "../domain/constants";
-import type { EmbedPresser } from "../rendered/embed-press";
+import type { EmbedPressBegin, EmbedPresser } from "../rendered/embed-press";
 import type { SettingsStore } from "../settings/settings";
 import { isInLivePreview, isInsideEmbed, isNonCheckboxTarget, type PathElement } from "./checkbox-hit-test";
 import { PressController, type PressOutput } from "./press-controller";
@@ -58,6 +68,8 @@ interface Released {
 	box: Element;
 	/** The press was a short click (not a hold, not a drag). */
 	short: boolean;
+	/** The press was a hold that has already cancelled the task. */
+	held: boolean;
 	at: number;
 }
 
@@ -106,52 +118,92 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 
 	const controller = new PressController();
 	let lastTick = now();
-	let active: { box: Element; startX: number; startY: number } | null = null;
+	/** The press in progress; `handle` is the presser's answer for its box, taken at pointerdown. */
+	let active: {
+		box: Element;
+		startX: number;
+		startY: number;
+		handle: Extract<EmbedPressBegin, { handled: true }>;
+		/** The hold has fired its cancel. */
+		fired: boolean;
+	} | null = null;
 	let released: Released | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
 	/** The box an Enter keydown just pressed, so a click it might also send is not a second press. */
 	let enterPress: { box: Element; at: number } | null = null;
 
 	const enabled = () => settings.get().statusCycle;
 
-	const advance = (input: (c: PressController) => PressOutput[]): PressOutput[] => {
+	const clearTimer = (): void => {
+		if (timer !== null) {
+			clearTimeout(timer);
+			timer = null;
+		}
+	};
+
+	/** Arm the timer for the moment the hold is due, or leave none when no press waits for it. */
+	const reschedule = (): void => {
+		clearTimer();
+		const ms = controller.msUntilLongPress();
+		if (ms === null) return;
+		timer = setTimeout(() => {
+			timer = null;
+			run(() => []);
+		}, ms);
+	};
+
+	/** Advance the controller's clock, feed it `input`; a hold that comes due cancels the task once. */
+	const run = (input: (c: PressController) => PressOutput[]): PressOutput[] => {
 		const t = now();
 		const outputs = [...controller.tick(t - lastTick), ...input(controller)];
 		lastTick = t;
+		if (outputs.includes("cancelTask") && active && !active.fired) {
+			active.fired = true;
+			void active.handle.run("longPress").catch(() => undefined);
+		}
+		reschedule();
 		return outputs;
 	};
 
 	const onPointerDown = (evt: PointerEvent): void => {
-		if (!enabled()) return;
-		const box = embedCheckbox(evt);
-		if (evt.isPrimary === false || (evt.pointerType === "mouse" && evt.button !== 0) || !box) {
-			// A press elsewhere ends a stale one whose release we never saw.
-			if (active) advance((c) => c.cancel());
-			active = null;
-			return;
-		}
-		advance((c) => c.down());
+		const box = evt.isPrimary === false || (evt.pointerType === "mouse" && evt.button !== 0) ? null : embedCheckbox(evt);
+		// A press elsewhere, a second finger, or a box this plugin leaves to
+		// Obsidian ends a stale press whose release we never saw.
+		const handle = box ? presser.begin(box) : null;
+		if (active) run((c) => c.cancel());
+		active = null;
+		if (!box || !handle?.handled) return;
 		released = null;
-		active = { box, startX: evt.clientX, startY: evt.clientY };
+		active = { box, startX: evt.clientX, startY: evt.clientY, handle, fired: false };
+		run((c) => c.down());
 	};
 
 	const onPointerMove = (evt: PointerEvent): void => {
 		if (!active) return;
 		const a = active;
-		advance((c) => c.move(evt.clientX - a.startX, evt.clientY - a.startY));
+		run((c) => c.move(evt.clientX - a.startX, evt.clientY - a.startY));
 	};
 
-	const onPointerUp = (): void => {
+	const onPointerUp = (evt: PointerEvent): void => {
 		if (!active) return;
-		const { box } = active;
+		const a = active;
+		const outputs = run((c) => c.up());
 		active = null;
-		const outputs = advance((c) => c.up());
-		released = { box, short: outputs.includes("advance"), at: now() };
+		released = { box: a.box, short: outputs.includes("advance"), held: a.fired, at: now() };
+		// The release of a hold is swallowed: it ends a gesture this plugin already acted on.
+		if (a.fired) swallow(evt);
 	};
 
 	const onPointerCancel = (): void => {
+		if (active) run((c) => c.cancel());
 		active = null;
 		released = null;
-		advance((c) => c.cancel());
+		clearTimer();
+	};
+
+	/** The platform's long-press menu: not over a press in progress, nor in the 600 ms after a hold. */
+	const onContextMenu = (evt: Event): void => {
+		if (run((c) => c.contextmenu()).includes("preventContextMenu")) evt.preventDefault();
 	};
 
 	/** What the click on `box` is: a short click, or nothing to write. */
@@ -168,9 +220,16 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 	};
 
 	const onClick = (evt: MouseEvent): void => {
-		if (!enabled()) return;
 		const box = embedCheckbox(evt);
 		if (!box) return;
+		if (!enabled()) {
+			// Left to the native toggle, except the click that follows a hold
+			// (which already cancelled the task).
+			const r = released;
+			released = null;
+			if (r && r.box === box && r.held && now() - r.at <= CLICK_SWALLOW_MS) swallow(evt);
+			return;
+		}
 		// Synchronous: the rendered DOM and the metadata cache decide it.
 		const handle = presser.begin(box);
 		if (!handle.handled) {
@@ -202,6 +261,7 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 			released = null;
 			enterPress = null;
 			controller.settingOff();
+			clearTimer();
 		}
 	});
 
@@ -210,12 +270,14 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 	plugin.registerDomEvent(doc, "pointermove", onPointerMove, opts);
 	plugin.registerDomEvent(doc, "pointerup", onPointerUp, opts);
 	plugin.registerDomEvent(doc, "pointercancel", onPointerCancel, opts);
+	plugin.registerDomEvent(doc, "contextmenu", onContextMenu, opts);
 	plugin.registerDomEvent(doc, "click", onClick, opts);
 	plugin.registerDomEvent(doc, "keydown", onKeyDown, opts);
 
 	return () => {
 		stopSettings();
 		controller.settingOff();
+		clearTimer();
 		active = null;
 		released = null;
 		enterPress = null;

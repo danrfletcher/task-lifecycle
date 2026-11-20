@@ -175,14 +175,21 @@ describe("embed press (src/status-cycle/wire-embed-press.ts, src/rendered/embed-
 		expect(src).toMatch(/const opts = \{ capture: true \}/);
 		// The native toggle is stopped before the press kind is decided, so no kind can let it through.
 		const handler = src.slice(src.indexOf("const onClick"), src.indexOf("const stopSettings"));
-		expect(handler.indexOf("swallow(evt)")).toBeGreaterThan(handler.indexOf("presser.begin(box)"));
-		expect(handler.indexOf("swallow(evt)")).toBeLessThan(handler.indexOf("clickKind(box, evt)"));
+		const begin = handler.indexOf("presser.begin(box)");
+		expect(begin).toBeGreaterThan(-1);
+		expect(handler.indexOf("swallow(evt)", begin)).toBeGreaterThan(begin);
+		expect(handler.indexOf("swallow(evt)", begin)).toBeLessThan(handler.indexOf("clickKind(box, evt)"));
 		expect(src).toMatch(/evt\.preventDefault\(\)/);
 		expect(src).toMatch(/evt\.stopImmediatePropagation\(\)/);
 	});
 
-	it("F9: no raw listener and no timer in the embed handler, so unload leaves nothing behind", () => {
-		expect(hits([wirePath], /addEventListener|setTimeout|setInterval|requestAnimationFrame/)).toEqual([]);
+	it("F9: no raw listener, no interval and one hold timer in the embed handler, cleared on unload", () => {
+		expect(hits([wirePath], /addEventListener|setInterval|requestAnimationFrame/)).toEqual([]);
+		// The only timer is the hold timer; every path that ends a press, and the stop function, clear it.
+		expect(hits([wirePath], /setTimeout\(/)).toHaveLength(1);
+		const src = read(wirePath);
+		const stop = src.slice(src.indexOf("return () => {"));
+		expect(stop).toMatch(/clearTimer\(\)/);
 	});
 
 	it("F2: the embed handler adds no command, hotkey, ribbon icon, setting or public API", () => {

@@ -18,6 +18,14 @@ export const COURSE_CACHE = {
 	],
 };
 
+/** A closed Course note with one lesson-content task ending in a block id (GP6). */
+export const COURSE_N1_TEXT = "- [ ] Take notes ^n1\n";
+
+export const COURSE_N1_CACHE = {
+	blocks: { n1: { position: pos(0) } },
+	listItems: [{ position: pos(0), parent: -1 }],
+};
+
 export const FORMS_TEXT = [
 	"# Top",
 	"",

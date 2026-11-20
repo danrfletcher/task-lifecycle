@@ -904,17 +904,17 @@ describe("F9: the native toggle never leaves an unstamped [x]", () => {
 		for (const evt of events) expect(evt.defaultPrevented).toBe(true);
 		expect(native.count()).toBe(0);
 		noBareDone(rig.courseText());
-		// Only a short click or a keyboard click moves the task; a drag or a hold only suppresses.
+		// Only a short click or a keyboard click moves the task; a drag only suppresses;
+		// a hold cancels it (G3, with the stamp).
 		const stepped = kind === "double click" ? 2 : kind === "click" || kind === "keyboard click" || kind === "Enter key" ? 1 : 0;
-		const expected = [
-			"- [ ] Lesson 2 content ^l2",
-			"- [/] Lesson 2 content ^l2",
-			`- [x] Lesson 2 content ✅ ${TODAY} ^l2`,
-		][stepped];
+		const expected =
+			kind === "hold of 500 ms"
+				? `- [-] Lesson 2 content ❌ ${TODAY} ^l2`
+				: ["- [ ] Lesson 2 content ^l2", "- [/] Lesson 2 content ^l2", `- [x] Lesson 2 content ✅ ${TODAY} ^l2`][stepped];
 		expect(rig.courseText()).toBe(`${expected}\n${SUBTASKS}`);
 	});
 
-	it("a hold on a task already [/] leaves it [/] (no bare [x] from the release's click)", async () => {
+	it("a hold on a task already [/] cancels it to [-] and the release's click never makes a bare [x]", async () => {
 		rig = await makeRig();
 		rig.app.vault.texts.set("Course.md", "- [/] Lesson 2 content ^l2\n");
 		const { boxes } = rig.addEmbed("Course#^l2", [[task("Lesson 2 content ", 0)]]);
@@ -924,6 +924,6 @@ describe("F9: the native toggle never leaves an unstamped [x]", () => {
 		pointer("pointerup", boxes[0]);
 		expect(click(boxes[0], 1).defaultPrevented).toBe(true);
 		await settle();
-		expect(rig.courseText()).toBe("- [/] Lesson 2 content ^l2\n");
+		expect(rig.courseText()).toBe(`- [-] Lesson 2 content ❌ ${TODAY} ^l2\n`);
 	});
 });

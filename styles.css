@@ -179,3 +179,15 @@ body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
 	opacity: 0.8;
 	font-weight: inherit;
 }
+
+/* A hold on a rendered checkbox (in an embed or in Reading view) cancels the
+   task. On a phone that same hold would open the system callout and start a
+   text selection, so both are turned off on the box itself. The press handler
+   also prevents the contextmenu event; this is the CSS half. */
+body.task-lifecycle-checkboxes .internal-embed input.task-list-item-checkbox,
+body.task-lifecycle-checkboxes .markdown-embed input.task-list-item-checkbox,
+body.task-lifecycle-checkboxes .markdown-preview-view input.task-list-item-checkbox {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+}
