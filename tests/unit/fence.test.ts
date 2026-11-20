@@ -54,7 +54,9 @@ describe("domain purity", () => {
 });
 
 describe("rendered-task resolver (src/rendered, rendered-match, embed-range)", () => {
-	const renderedFiles = files(join(root, "src", "rendered"));
+	// `source-writer.ts` is the one writer in src/rendered; it has its own block below.
+	const writerPath = join(root, "src", "rendered", "source-writer.ts");
+	const renderedFiles = files(join(root, "src", "rendered")).filter((p) => p !== writerPath);
 	const readOnlyFiles = [
 		...renderedFiles,
 		join(root, "src", "domain", "rendered-match.ts"),
@@ -92,6 +94,55 @@ describe("rendered-task resolver (src/rendered, rendered-match, embed-range)", (
 
 	it("registers no command and no hotkey (F2)", () => {
 		expect(hits(renderedFiles, /addCommand|hotkeys|addRibbonIcon|addSettingTab/)).toEqual([]);
+	});
+});
+
+describe("source writer (src/rendered/source-writer.ts)", () => {
+	const writerPath = join(root, "src", "rendered", "source-writer.ts");
+	const renderedAll = files(join(root, "src", "rendered"));
+
+	it("exists, so the scans are not vacuous", () => {
+		expect(read(writerPath).length).toBeGreaterThan(0);
+	});
+
+	it("F3: vault.process has exactly one call site in src, and it is the writer", () => {
+		const found = hits(srcFiles, /vault\.process\(/);
+		expect(found).toHaveLength(1);
+		expect(found[0]).toContain("src/rendered/source-writer.ts");
+	});
+
+	it("F3: the writer changes the note only through editor.transaction or vault.process", () => {
+		expect(
+			hits(
+				[writerPath],
+				/vault\.(?:modify|create|append|delete|rename|trash)|fileManager\.|editor\.(?:replaceRange|replaceSelection|setValue|setLine)|\.replaceRange\(|\.dispatch\(/
+			)
+		).toEqual([]);
+	});
+
+	it("F3: the writer imports no CodeMirror, no change-detector internals and no annotation", () => {
+		const src = read(writerPath);
+		expect(src).not.toMatch(/@codemirror/);
+		expect(src).not.toMatch(/change-detector|taskLifecycleSelfWrite|Annotation/);
+		expect(src).not.toMatch(/events\/event-bus|cascade\//);
+	});
+
+	it("F1/F9: the writer listens to nothing and touches no click", () => {
+		expect(
+			hits(
+				renderedAll,
+				/addEventListener|removeEventListener|registerDomEvent|registerEvent|\.on\(|\bonclick\b|preventDefault|stopPropagation|stopImmediatePropagation|dispatchEvent/
+			)
+		).toEqual([]);
+	});
+
+	it("F2/F5: the writer registers no command, hotkey, setting or public API", () => {
+		expect(hits(renderedAll, /addCommand|hotkeys|addRibbonIcon|addSettingTab|window\.|globalThis/)).toEqual([]);
+	});
+
+	it("only type imports from obsidian in src/rendered, so nothing is pulled in at runtime", () => {
+		const valueImport = /import\s+(?!type\b)[^;]*from\s+["']obsidian["']/;
+		expect(hits(renderedAll, valueImport)).toEqual([]);
 	});
 });
 
@@ -154,10 +205,12 @@ describe("fence regression checks", () => {
 		).toEqual([]);
 	});
 
-	it("F2: no vault writes, no task index and no headless path in src", () => {
+	it("F2: no vault.modify, vault.append, modify listener, task index or headless path in src; vault.process only in the source writer", () => {
 		expect(
-			hits(srcFiles, /vault\.modify|vault\.process|vault\.append|modifyHeadless|onStatusChanged/)
+			hits(srcFiles, /vault\.modify|vault\.append|vault\.on\(\s*["']modify["']|modifyHeadless|onStatusChanged/)
 		).toEqual([]);
+		const outside = srcFiles.filter((p) => !/src\/rendered\/source-writer\.ts$/.test(p));
+		expect(hits(outside, /vault\.process/)).toEqual([]);
 	});
 
 	it("F2: the metadata cache is read only under src/rendered", () => {

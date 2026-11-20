@@ -5,6 +5,7 @@
  */
 import type { App, Plugin, TFile } from "obsidian";
 
+import { findOpenEditor } from "../rendered/editor-lookup";
 import type { TaskLifecycleEvents } from "../events/event-bus";
 import type { SettingsStore } from "../settings/settings";
 import { createCascadeService, type CascadeEditor } from "./cascade-service";
@@ -19,23 +20,11 @@ export interface WireCascadeDeps {
 	prompt?: CascadePrompt;
 }
 
-/** The slice of a Markdown view the editor lookup reads. */
-interface NoteView {
-	file?: { path: string } | null;
-	editor?: CascadeEditor;
-}
-
 /** Wire the cascade. Returns a function that stops it and closes an open dialog. */
 export function wireCascade(deps: WireCascadeDeps): () => void {
 	const { plugin, app } = deps;
 
-	const getEditor = (file: TFile): CascadeEditor | null => {
-		for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-			const view = leaf.view as unknown as NoteView;
-			if (view.file?.path === file.path && view.editor) return view.editor;
-		}
-		return null;
-	};
+	const getEditor = (file: TFile): CascadeEditor | null => findOpenEditor(app, file);
 
 	const service = createCascadeService({
 		events: deps.events,

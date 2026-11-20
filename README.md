@@ -30,6 +30,10 @@ npm run build
 
 Copy `main.js`, `manifest.json` and `styles.css` into `<your vault>/.obsidian/plugins/task-lifecycle/`, then enable **Task Lifecycle** in Settings → Community plugins.
 
+## Known limits
+
+- **Undo does not revert a tick made on a closed note.** A tick on a task whose note is not open in any pane is written to the file directly, not through an editor, so no undo history holds it. Undo in a pane (or Ctrl/Cmd+Z after opening the note) leaves that tick in place; change the task back by clicking it again. A tick on a note that is open in a pane is an editor change, and one undo reverts the status and its stamp together.
+
 ## Conflicts
 
 Task Lifecycle does not detect or adapt to other plugins. Running it next to them would handle the same checkbox click twice, so:

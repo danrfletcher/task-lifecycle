@@ -4,6 +4,7 @@ import { wireCascade } from "./cascade/wire-cascade";
 import { createChangeDetector } from "./editor/change-detector";
 import { TaskLifecycleEvents } from "./events/event-bus";
 import { resolveRenderedTask, type RenderedTaskResult } from "./rendered/resolve-rendered-task";
+import { createSourceWriter, type SourceWriter } from "./rendered/source-writer";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
 import { SettingsStore } from "./settings/settings";
 import { TaskLifecycleSettingTab } from "./settings/settings-tab";
@@ -26,6 +27,14 @@ export default class TaskLifecyclePlugin extends Plugin {
 	 */
 	resolveRenderedTask = (checkbox: Element): Promise<RenderedTaskResult> =>
 		resolveRenderedTask(this.app, checkbox);
+
+	/**
+	 * The one writer for a task line in a source note, on behalf of a rendered
+	 * checkbox (`press(file, line, kind)`). Nothing calls it yet: no click
+	 * handler is wired. Reachable from the dev console for testing only; this
+	 * is not a public API. Null before load and after unload.
+	 */
+	sourceWriter: SourceWriter | null = null;
 
 	private disposeCheckboxIcons: (() => void) | null = null;
 	private disposeCheckboxPress: (() => void) | null = null;
@@ -62,11 +71,17 @@ export default class TaskLifecyclePlugin extends Plugin {
 			settings: this.settings,
 			events: this.events,
 		});
+		this.sourceWriter = createSourceWriter({
+			app: this.app,
+			getSettings: () => this.settings.get(),
+		});
 		this.addSettingTab(new TaskLifecycleSettingTab(this.app, this, this.settings));
 	}
 
 	onunload(): void {
 		this.unloaded = true;
+		this.sourceWriter?.dispose();
+		this.sourceWriter = null;
 		this.disposeCascade?.();
 		this.disposeCascade = null;
 		this.disposeCheckboxPress?.();

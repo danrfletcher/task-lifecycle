@@ -44,6 +44,63 @@ describe("plugin.resolveRenderedTask (the console entry point)", () => {
 	});
 });
 
+describe("plugin.sourceWriter", () => {
+	it("is null before load, created by load, disposed and cleared by unload, and a second load works", async () => {
+		const plugin = makePlugin();
+		expect(plugin.sourceWriter).toBeNull();
+
+		await plugin.onload();
+		const first = plugin.sourceWriter;
+		expect(first).not.toBeNull();
+		expect(typeof first?.press).toBe("function");
+		const dispose = vi.spyOn(first!, "dispose");
+
+		plugin.onunload();
+		expect(dispose).toHaveBeenCalledTimes(1);
+		expect(plugin.sourceWriter).toBeNull();
+		// A writer that was disposed does nothing, even if something kept a reference.
+		const dropped = await first!.press({ path: "Course.md" } as never, 0, "click");
+		expect(dropped).toEqual({ status: "skipped", reason: "disposed" });
+
+		const again = makePlugin(plugin.dataFile);
+		await again.onload();
+		expect(again.sourceWriter).not.toBeNull();
+		expect(again.sourceWriter).not.toBe(first);
+		again.onunload();
+		expect(again.sourceWriter).toBeNull();
+	});
+
+	it("unload while settings are still loading leaves no writer", async () => {
+		const plugin = makePlugin();
+		const loading = plugin.onload();
+		plugin.onunload();
+		await loading;
+		expect(plugin.sourceWriter).toBeNull();
+	});
+
+	it("writes through the plugin's own app and settings: a press on a closed note stamps it", async () => {
+		const plugin = makePlugin();
+		const app = plugin.app as unknown as { vault: Record<string, unknown> };
+		const texts = new Map([["Course.md", "- [/] Lesson 2 content ^l2\n"]]);
+		app.vault.process = async (f: { path: string }, fn: (d: string) => string) => {
+			const next = fn(texts.get(f.path) ?? "");
+			texts.set(f.path, next);
+			return next;
+		};
+		await plugin.onload();
+
+		await plugin.sourceWriter!.press({ path: "Course.md" } as never, 0, "click");
+		expect(texts.get("Course.md")).toMatch(/^- \[x\] Lesson 2 content ✅ \d{4}-\d{2}-\d{2} \^l2\n$/);
+
+		// Close stamps off is read at write time.
+		await plugin.settings.update({ closeStamps: false });
+		texts.set("Course.md", "- [/] Lesson 2 content ^l2\n");
+		await plugin.sourceWriter!.press({ path: "Course.md" } as never, 0, "click");
+		expect(texts.get("Course.md")).toBe("- [x] Lesson 2 content ^l2\n");
+		plugin.onunload();
+	});
+});
+
 describe("plugin lifecycle (settings part)", () => {
 	it("fresh vault: all four on, class set, one settings tab, no commands", async () => {
 		const plugin = makePlugin();

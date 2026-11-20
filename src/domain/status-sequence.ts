@@ -27,6 +27,14 @@ export function nextStatus(current: string): StatusChar {
 	return STATUS_SEQUENCE[(idx + 1) % STATUS_SEQUENCE.length];
 }
 
+/** A short click (cycle) or a long press (cancel) on a checkbox. */
+export type PressKind = "click" | "longPress";
+
+/** The status a press moves `from` to. A long press always goes to "-". */
+export function targetStatus(from: string, kind: PressKind): string {
+	return kind === "longPress" ? "-" : nextStatus(from);
+}
+
 /** Kind of a status char. Unknown chars count as open. */
 export function statusKind(c: string): StatusKind {
 	switch (c) {
