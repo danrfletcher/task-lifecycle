@@ -174,13 +174,23 @@ describe("embed press (src/status-cycle/wire-embed-press.ts, src/rendered/embed-
 		expect(src).toMatch(/registerDomEvent\(doc, "click", onClick, opts\)/);
 		expect(src).toMatch(/const opts = \{ capture: true \}/);
 		// The native toggle is stopped before the press kind is decided, so no kind can let it through.
-		const handler = src.slice(src.indexOf("const onClick"), src.indexOf("const stopSettings"));
+		const handler = src.slice(src.indexOf("const onClick"), src.indexOf("const onKeyDown"));
 		const begin = handler.indexOf("presser.begin(box)");
 		expect(begin).toBeGreaterThan(-1);
 		expect(handler.indexOf("swallow(evt)", begin)).toBeGreaterThan(begin);
-		expect(handler.indexOf("swallow(evt)", begin)).toBeLessThan(handler.indexOf("clickKind(box, evt)"));
+		expect(handler.indexOf("swallow(evt)", begin)).toBeLessThan(handler.indexOf("isShortClick(box, evt)"));
 		expect(src).toMatch(/evt\.preventDefault\(\)/);
 		expect(src).toMatch(/evt\.stopImmediatePropagation\(\)/);
+	});
+
+	it("G7/F9: the embed handler never returns early on the Status cycle setting, and reads it live, not cached", () => {
+		const src = read(wirePath);
+		// Every read of the setting is in the kind of a press, never a guard that leaves the click to the native toggle.
+		const reads = src.split("\n").filter((l) => /statusCycle/.test(l) && !/^\s*(?:\*|\/\/|\/\*)/.test(l));
+		expect(reads).toHaveLength(1);
+		expect(reads[0]).toMatch(/settings\.get\(\)\.statusCycle \? "click" : "toggle"/);
+		expect(src).not.toMatch(/if\s*\(\s*!\s*(?:enabled|settings\.get\(\)\.statusCycle)/);
+		expect(src).not.toMatch(/settings\.subscribe|const\s+\w+\s*=\s*settings\.get\(\)/);
 	});
 
 	it("F9: no raw listener, no interval and one hold timer in the embed handler, cleared on unload", () => {

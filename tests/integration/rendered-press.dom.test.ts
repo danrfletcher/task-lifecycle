@@ -666,18 +666,19 @@ describe("G7 (hold only): Status cycle off", () => {
 		expect(rig.app.vault.writes).toHaveLength(1);
 	});
 
-	it("a tap is left to the native toggle: nothing written, click not prevented", async () => {
+	it("a tap is the plain toggle (the settings matrix is in rendered-settings.dom.test.ts)", async () => {
 		rig = await makeRig({ statusCycle: false });
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
 		const native = watchNative(boxes[0]);
 		const after = mouseClick(boxes[0]);
 		await settle();
-		expect(after.defaultPrevented).toBe(false);
-		expect(native.count()).toBe(1);
-		expect(rig.app.vault.writes).toEqual([]);
+		expect(after.defaultPrevented).toBe(true);
+		expect(native.count()).toBe(0);
+		expect(rig.courseText()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
+		expect(rig.app.vault.writes).toHaveLength(1);
 	});
 
-	it("a swipe is not a hold: nothing written, click not swallowed by this handler", async () => {
+	it("a swipe is not a hold: nothing written, and the click is still swallowed (the plugin handles this box)", async () => {
 		rig = await makeRig({ statusCycle: false });
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
 		down(boxes[0], "touch");
@@ -686,7 +687,7 @@ describe("G7 (hold only): Status cycle off", () => {
 		up(boxes[0], "touch", 30);
 		const after = click(boxes[0], 1);
 		await settle();
-		expect(after.defaultPrevented).toBe(false);
+		expect(after.defaultPrevented).toBe(true);
 		expect(rig.app.vault.writes).toEqual([]);
 	});
 });

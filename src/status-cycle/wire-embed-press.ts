@@ -41,14 +41,23 @@
  * function clears it. A short click is measured from the clock at release,
  * not by the timer.
  *
- * With "Status cycle" off a short click and Enter are left to the native
- * toggle (the plain toggle is the settings PR's job), but a hold still
- * cancels and the click after it is still swallowed.
+ * Settings (G7). The press is intercepted whatever the "Status cycle"
+ * setting says: returning early, as the editor handler does when it is off,
+ * would hand the click to Obsidian's native toggle, which writes a bare `[x]`
+ * with no stamp. Instead the setting only picks the kind of a short click
+ * (and of Enter), read from `settings.get()` at the moment the click is
+ * dispatched, never cached: on it is the cycle (`click`), off it is the plain
+ * toggle (`toggle`: ` ` to `x`, any other status to ` `), which the plugin
+ * writes itself, so stamps and cascade follow as for any other write. A hold
+ * cancels either way. The kind of one press is fixed when it is dispatched,
+ * so a flip of the setting during a press changes the next press only: the
+ * press in progress is neither dropped nor written twice.
  */
 import type { Plugin } from "obsidian";
 
 import { CLICK_SWALLOW_MS } from "../domain/constants";
 import type { EmbedPressBegin, EmbedPresser } from "../rendered/embed-press";
+import type { PressKind } from "../rendered/source-writer";
 import type { SettingsStore } from "../settings/settings";
 import { isInLivePreview, isInsideEmbed, isNonCheckboxTarget, type PathElement } from "./checkbox-hit-test";
 import { PressController, type PressOutput } from "./press-controller";
@@ -56,7 +65,8 @@ import { PressController, type PressOutput } from "./press-controller";
 export interface EmbedPressDeps {
 	plugin: Pick<Plugin, "registerDomEvent">;
 	presser: EmbedPresser;
-	settings: Pick<SettingsStore, "get" | "subscribe">;
+	/** Read per press (never cached), so a toggle applies to boxes already on screen. */
+	settings: Pick<SettingsStore, "get">;
 	/** Default `document`. */
 	document?: Document;
 	/** Default `Date.now`. */
@@ -68,8 +78,6 @@ interface Released {
 	box: Element;
 	/** The press was a short click (not a hold, not a drag). */
 	short: boolean;
-	/** The press was a hold that has already cancelled the task. */
-	held: boolean;
 	at: number;
 }
 
@@ -132,7 +140,8 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 	/** The box an Enter keydown just pressed, so a click it might also send is not a second press. */
 	let enterPress: { box: Element; at: number } | null = null;
 
-	const enabled = () => settings.get().statusCycle;
+	/** The kind of a short click, from the setting as it is right now. */
+	const shortKind = (): PressKind => (settings.get().statusCycle ? "click" : "toggle");
 
 	const clearTimer = (): void => {
 		if (timer !== null) {
@@ -189,7 +198,7 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		const a = active;
 		const outputs = run((c) => c.up());
 		active = null;
-		released = { box: a.box, short: outputs.includes("advance"), held: a.fired, at: now() };
+		released = { box: a.box, short: outputs.includes("advance"), at: now() };
 		// The release of a hold is swallowed: it ends a gesture this plugin already acted on.
 		if (a.fired) swallow(evt);
 	};
@@ -206,30 +215,22 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		if (run((c) => c.contextmenu()).includes("preventContextMenu")) evt.preventDefault();
 	};
 
-	/** What the click on `box` is: a short click, or nothing to write. */
-	const clickKind = (box: Element, evt: MouseEvent): "click" | null => {
+	/** Whether the click on `box` is a short click (else there is nothing to write). */
+	const isShortClick = (box: Element, evt: MouseEvent): boolean => {
 		const r = released;
 		released = null;
-		if (r && r.box === box && now() - r.at <= CLICK_SWALLOW_MS) return r.short ? "click" : null;
+		if (r && r.box === box && now() - r.at <= CLICK_SWALLOW_MS) return r.short;
 		const e = enterPress;
 		enterPress = null;
-		if (e && e.box === box && now() - e.at <= CLICK_SWALLOW_MS) return null;
+		if (e && e.box === box && now() - e.at <= CLICK_SWALLOW_MS) return false;
 		// No press seen on this box: Space or Enter on a focused box sends a
 		// click with detail 0. Any other click here is a drag that ended on it.
-		return evt.detail === 0 ? "click" : null;
+		return evt.detail === 0;
 	};
 
 	const onClick = (evt: MouseEvent): void => {
 		const box = embedCheckbox(evt);
 		if (!box) return;
-		if (!enabled()) {
-			// Left to the native toggle, except the click that follows a hold
-			// (which already cancelled the task).
-			const r = released;
-			released = null;
-			if (r && r.box === box && r.held && now() - r.at <= CLICK_SWALLOW_MS) swallow(evt);
-			return;
-		}
 		// Synchronous: the rendered DOM and the metadata cache decide it.
 		const handle = presser.begin(box);
 		if (!handle.handled) {
@@ -237,13 +238,12 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 			return;
 		}
 		swallow(evt);
-		const kind = clickKind(box, evt);
-		if (kind === null) return;
-		void handle.run(kind).catch(() => undefined);
+		if (!isShortClick(box, evt)) return;
+		void handle.run(shortKind()).catch(() => undefined);
 	};
 
 	const onKeyDown = (evt: KeyboardEvent): void => {
-		if (!enabled() || evt.key !== "Enter") return;
+		if (evt.key !== "Enter") return;
 		const box = embedCheckbox(evt);
 		if (!box) return;
 		const handle = presser.begin(box);
@@ -252,18 +252,8 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		swallow(evt);
 		if (evt.repeat || evt.ctrlKey || evt.metaKey || evt.altKey || evt.shiftKey) return;
 		enterPress = { box, at: now() };
-		void handle.run("click").catch(() => undefined);
+		void handle.run(shortKind()).catch(() => undefined);
 	};
-
-	const stopSettings = settings.subscribe((next, prev) => {
-		if (prev.statusCycle && !next.statusCycle) {
-			active = null;
-			released = null;
-			enterPress = null;
-			controller.settingOff();
-			clearTimer();
-		}
-	});
 
 	const opts = { capture: true };
 	plugin.registerDomEvent(doc, "pointerdown", onPointerDown, opts);
@@ -275,7 +265,6 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 	plugin.registerDomEvent(doc, "keydown", onKeyDown, opts);
 
 	return () => {
-		stopSettings();
 		controller.settingOff();
 		clearTimer();
 		active = null;

@@ -14,7 +14,7 @@ Only the checkbox character, the stamps and the single space before a stamp are 
 
 Settings → Task Lifecycle has four toggles, all on by default:
 
-- **Status cycle**
+- **Status cycle**. Off, a click on a checkbox in an embed is the plain toggle (open to done, anything else to open), written by the plugin so the stamp and cascade still follow; a hold still cancels.
 - **Close stamps**
 - **Close cascade**
 - **Checkbox icons**

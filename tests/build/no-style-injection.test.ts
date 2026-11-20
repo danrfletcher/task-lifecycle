@@ -72,6 +72,14 @@ describe("F9: no runtime style injection in the built main.js", () => {
 	it("main.js never calls addCommand (F3)", () => {
 		expect(main).not.toMatch(/addCommand/);
 	});
+
+	it("main.js registers no ribbon icon and no hotkey (F2)", () => {
+		expect(main).not.toMatch(/addRibbonIcon|hotkeys/);
+	});
+
+	it("main.js draws no icon by inline style (F7): no setCssProps, setCssStyles, cssText or style attribute", () => {
+		expect(main).not.toMatch(/setCssProps|setCssStyles|cssText|setAttribute\(\s*["']style["']/);
+	});
 });
 
 describe("F9: sources", () => {
@@ -95,6 +103,22 @@ describe("F9: sources", () => {
 		const cfg = readFileSync(join(root, "esbuild.config.mjs"), "utf8");
 		expect(cfg).not.toMatch(/loader/);
 		expect(cfg).not.toMatch(/["']\.css["']/);
+	});
+
+	it("F2: src/ registers no command, ribbon icon or hotkey", () => {
+		for (const p of files(join(root, "src"))) {
+			expect(readFileSync(p, "utf8"), relative(root, p)).not.toMatch(/addCommand|addRibbonIcon|hotkeys/);
+		}
+	});
+
+	it("F7: src/rendered and src/status-cycle only toggle classes: no inline style, setCssProps or cssText", () => {
+		const dirs = ["rendered", "status-cycle"].flatMap((d) => files(join(root, "src", d)));
+		expect(dirs.length).toBeGreaterThan(0);
+		for (const p of dirs) {
+			expect(readFileSync(p, "utf8"), relative(root, p)).not.toMatch(
+				/\.style\b|setCssProps|setCssStyles|cssText|setAttribute\(\s*["']style["']/
+			);
+		}
 	});
 
 	it("src/ never writes to document.head or calls addCommand", () => {

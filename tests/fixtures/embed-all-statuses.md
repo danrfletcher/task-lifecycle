@@ -1,0 +1,6 @@
+- [ ] Open task
+- [/] In progress task
+- [x] Done task ✅ 2026-11-01
+- [X] Capital done task ✅ 2026-11-01
+- [-] Cancelled task ❌ 2026-11-01
+- [?] Unknown task

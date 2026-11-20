@@ -228,23 +228,27 @@ describe("G1: the suppress decision is synchronous, the write is awaited", () =>
 		expect(rig.app.vault.writes).toEqual([]);
 	});
 
-	it("T5: Enter with Status cycle off is left to the native box", async () => {
+	it("T5 + G7: Enter with Status cycle off is the plain toggle, written by the plugin, native box never reached", async () => {
 		rig = await makeRig({ statusCycle: false });
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
-		expect(keydown(boxes[0], "Enter").defaultPrevented).toBe(false);
+		const native = watchNative(boxes[0]);
+		expect(keydown(boxes[0], "Enter").defaultPrevented).toBe(true);
 		await settle();
-		expect(rig.app.vault.writes).toEqual([]);
+		expect(rig.courseText()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
+		expect(rig.app.vault.writes).toHaveLength(1);
+		expect(native.count()).toBe(0);
 	});
 
-	it("with Status cycle off a click on an embedded box is left to the native toggle", async () => {
+	it("G7: with Status cycle off a click on an embedded box is the plain toggle, not Obsidian's bare [x]", async () => {
 		rig = await makeRig({ statusCycle: false });
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
 		const native = watchNative(boxes[0]);
 		const evt = mouseClick(boxes[0]);
 		await settle();
-		expect(evt.defaultPrevented).toBe(false);
-		expect(native.count()).toBe(1);
-		expect(rig.app.vault.writes).toEqual([]);
+		expect(evt.defaultPrevented).toBe(true);
+		expect(native.count()).toBe(0);
+		expect(rig.courseText()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
+		expect(rig.app.vault.writes).toHaveLength(1);
 	});
 });
 

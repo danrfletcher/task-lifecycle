@@ -7,6 +7,8 @@
  */
 import { vi } from "vitest";
 import TaskLifecyclePlugin from "../../src/main";
+import { STATUS_CHANGED_EVENT } from "../../src/events/event-bus";
+import { makeCmEditor, type CmEditorHandle } from "./cm-editor";
 import { App, Notice, type MockTFile } from "../__mocks__/obsidian";
 import { COURSE_CACHE, COURSE_TEXT, FORMS_CACHE, FORMS_TEXT } from "../fixtures/rendered-notes";
 import { embed, mountHost, type TaskSpec } from "./rendered-dom";
@@ -46,7 +48,8 @@ export const lessonSection = (): TaskSpec[] => [
 	task("Lesson 2 content ", 0, [task("Watch video", 1), task("Take notes", 2)]),
 ];
 
-export async function makeRig(settings?: Record<string, boolean>): Promise<EmbedRig> {
+/** `settings` is what `data.json` holds: a partial settings object, or anything (a corrupt file). */
+export async function makeRig(settings?: unknown): Promise<EmbedRig> {
 	vi.useFakeTimers();
 	vi.setSystemTime(new Date(2026, 10, 20, 12, 0, 0));
 	document.body.replaceChildren();
@@ -133,4 +136,22 @@ export function watchNative(box: Element): { count(): number } {
 		n += 1;
 	});
 	return { count: () => n };
+}
+
+/**
+ * Open `Course.md` in a real CodeMirror editor (with the change detector) in
+ * the rig's workspace, and pass the detector's status events on to the
+ * plugin's own bus, as the editor extension does in the app, so the plugin's
+ * cascade sees them. `closeStamps` is the detector's own setting: keep it the
+ * same as the plugin's.
+ */
+export function openCourseInEditor(
+	rig: EmbedRig,
+	text: string,
+	opts: { closeStamps?: boolean } = {}
+): CmEditorHandle {
+	const cm = makeCmEditor(text, { today: new Date(2026, 10, 20, 12, 0, 0), closeStamps: opts.closeStamps });
+	cm.bus.on(STATUS_CHANGED_EVENT, (p) => rig.plugin.events.emit(STATUS_CHANGED_EVENT, p));
+	rig.app.workspace.leaves.push({ view: { file: { path: "Course.md" }, editor: cm.editor } });
+	return cm;
 }

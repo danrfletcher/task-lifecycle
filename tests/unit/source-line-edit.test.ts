@@ -13,6 +13,34 @@ import { DEMO_TASK_LINES, fixtureFile, remainder, SHAPE_LINES, TODAY } from "../
 const ON: LineEditOptions = { stampsOn: true, today: TODAY };
 const OFF: LineEditOptions = { stampsOn: false, today: TODAY };
 
+describe("planLineEdit: the plain toggle (Status cycle off)", () => {
+	it("open to done stamps the line before its block id", () => {
+		const r = planLineEdit(["- [ ] Lesson 2 content ^l2"], 0, "toggle", ON);
+		expect(r).toMatchObject({ edit: { from: " ", to: "x", after: "- [x] Lesson 2 content ✅ 2026-11-20 ^l2" } });
+	});
+
+	it.each(["x", "X", "-"])("[%s] goes back to open and loses its stamp", (from) => {
+		const line = `- [${from}] Lesson ✅ 2026-11-01 ^l2`;
+		const r = planLineEdit([line], 0, "toggle", ON);
+		expect(r).toMatchObject({ edit: { to: " ", after: "- [ ] Lesson ^l2" } });
+	});
+
+	it.each(["/", "?"])("[%s] goes to open; the open kinds carry no stamp to remove", (from) => {
+		expect(planLineEdit([`- [${from}] Lesson ^l2`], 0, "toggle", ON)).toMatchObject({
+			edit: { to: " ", after: "- [ ] Lesson ^l2" },
+		});
+	});
+
+	it("with stamps off only the status char changes, and an existing stamp stays", () => {
+		expect(planLineEdit(["- [ ] Lesson ^l2"], 0, "toggle", OFF)).toMatchObject({
+			edit: { after: "- [x] Lesson ^l2" },
+		});
+		expect(planLineEdit(["- [x] Lesson ✅ 2026-11-01 ^l2"], 0, "toggle", OFF)).toMatchObject({
+			edit: { after: "- [ ] Lesson ✅ 2026-11-01 ^l2" },
+		});
+	});
+});
+
 describe("splitLines / joinLines", () => {
 	it.each([
 		["", [{ text: "", eol: "" }]],
