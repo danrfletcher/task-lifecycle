@@ -14,6 +14,20 @@ export const editorInfoField = StateField.define<{ file: unknown } | null>({
 	update: (value) => value,
 });
 
+/** `Notice`: every message shown is recorded in `Notice.shown`. */
+export class Notice {
+	static shown: string[] = [];
+	static reset(): void {
+		Notice.shown = [];
+	}
+	constructor(
+		public message: string,
+		public timeout?: number
+	) {
+		Notice.shown.push(message);
+	}
+}
+
 export class MockElement {
 	children: unknown[] = [];
 	empty(): void {
@@ -140,9 +154,28 @@ export class MockVault {
 		if (text === undefined || this.unreadable.has(file.path)) throw new Error("ENOENT");
 		return text;
 	}
-	async process(file: MockTFile): Promise<string> {
+	/** Paths whose next `process` call waits for the release function `hold` returned. */
+	private gates = new Map<string, Array<Promise<void>>>();
+	/** Make the next `process` call on `path` wait until the returned function is called. */
+	hold(path: string): () => void {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => (release = r));
+		this.gates.set(path, [...(this.gates.get(path) ?? []), gate]);
+		return release;
+	}
+	/**
+	 * Like `vault.process`: the callback gets the stored text and its result is
+	 * stored. A missing (deleted) file rejects, as Obsidian's does.
+	 */
+	async process(file: MockTFile, fn?: (data: string) => string): Promise<string> {
 		this.writes.push(`process:${file.path}`);
-		return this.texts.get(file.path) ?? "";
+		const gate = this.gates.get(file.path)?.shift();
+		if (gate) await gate;
+		const text = this.texts.get(file.path);
+		if (text === undefined || this.unreadable.has(file.path)) throw new Error("ENOENT");
+		const next = fn ? fn(text) : text;
+		this.texts.set(file.path, next);
+		return next;
 	}
 	async modify(file: MockTFile): Promise<void> {
 		this.writes.push(`modify:${file.path}`);

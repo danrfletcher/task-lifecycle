@@ -60,6 +60,11 @@ export function isInLivePreview(path: readonly PathElement[]): boolean {
 	return path.some((el) => hasClass(el, "is-live-preview"));
 }
 
+/** True if the path is inside an embed (`![[...]]` drawn by Obsidian). */
+export function isInsideEmbed(path: readonly PathElement[]): boolean {
+	return path.some((el) => hasClass(el, "internal-embed") || hasClass(el, "markdown-embed"));
+}
+
 export interface WidgetHit {
 	/** The path holds the Live Preview `input.task-list-item-checkbox` widget. */
 	hitsCheckbox: boolean;

@@ -33,6 +33,7 @@ import type { SettingsStore } from "../settings/settings";
 import {
 	isCheckboxPress,
 	isInLivePreview,
+	isInsideEmbed,
 	isNonCheckboxTarget,
 	pathHitsWidget,
 	type PathElement,
@@ -167,6 +168,8 @@ export function wireCheckboxPress(deps: CheckboxPressDeps): () => void {
 			return;
 		}
 		const target = evt.target as Node | null;
+		// A checkbox inside an embed belongs to `wire-embed-press.ts`.
+		if (isInsideEmbed(eventPath(evt))) return;
 		const view = viewFor(target);
 		const hit = view ? resolvePress(view, evt) : null;
 		if (!view || !hit) {
@@ -259,6 +262,8 @@ export function wireCheckboxPress(deps: CheckboxPressDeps): () => void {
 		if (!enabled()) return;
 		const path = eventPath(evt);
 		if (!isInLivePreview(path) || isNonCheckboxTarget(path)) return;
+		// A checkbox inside an embed belongs to `wire-embed-press.ts`.
+		if (isInsideEmbed(path)) return;
 		const { hitsCheckbox, hitsLabel } = pathHitsWidget(path);
 		if (!hitsCheckbox && !hitsLabel) return;
 		const view = viewFor(evt.target);

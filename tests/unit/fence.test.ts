@@ -146,6 +146,68 @@ describe("source writer (src/rendered/source-writer.ts)", () => {
 	});
 });
 
+describe("embed press (src/status-cycle/wire-embed-press.ts, src/rendered/embed-press.ts)", () => {
+	const wirePath = join(root, "src", "status-cycle", "wire-embed-press.ts");
+	const pressPath = join(root, "src", "rendered", "embed-press.ts");
+
+	it("the files exist, so the greps below are not vacuous", () => {
+		expect(read(wirePath).length).toBeGreaterThan(0);
+		expect(read(pressPath).length).toBeGreaterThan(0);
+	});
+
+	it("F1: a file changed from outside is never stamped: no modify/changed handler, no vault or cache watcher, no polling", () => {
+		expect(
+			hits(
+				srcFiles,
+				/\.on\(\s*["'](?:modify|changed|create|delete|rename)["']|registerEvent\(\s*(?:this\.)?app\.(?:vault|metadataCache)|setInterval|registerInterval|MutationObserver/
+			)
+		).toEqual([]);
+	});
+
+	it("F6: no read of app.plugins and no detection of other plugins in src", () => {
+		expect(hits(srcFiles, /\bplugins\.(?:plugins|getPlugin|enabledPlugins)|app\.plugins|\.plugins\[/)).toEqual([]);
+		expect(hits(srcFiles, /enabledPlugins|getPlugin\(|isPluginEnabled/)).toEqual([]);
+	});
+
+	it("F9: the click is taken in the capture phase through registerDomEvent and always swallowed once handled", () => {
+		const src = read(wirePath);
+		expect(src).toMatch(/registerDomEvent\(doc, "click", onClick, opts\)/);
+		expect(src).toMatch(/const opts = \{ capture: true \}/);
+		// The native toggle is stopped before the press kind is decided, so no kind can let it through.
+		const handler = src.slice(src.indexOf("const onClick"), src.indexOf("const stopSettings"));
+		expect(handler.indexOf("swallow(evt)")).toBeGreaterThan(handler.indexOf("presser.begin(box)"));
+		expect(handler.indexOf("swallow(evt)")).toBeLessThan(handler.indexOf("clickKind(box, evt)"));
+		expect(src).toMatch(/evt\.preventDefault\(\)/);
+		expect(src).toMatch(/evt\.stopImmediatePropagation\(\)/);
+	});
+
+	it("F9: no raw listener and no timer in the embed handler, so unload leaves nothing behind", () => {
+		expect(hits([wirePath], /addEventListener|setTimeout|setInterval|requestAnimationFrame/)).toEqual([]);
+	});
+
+	it("F2: the embed handler adds no command, hotkey, ribbon icon, setting or public API", () => {
+		expect(hits([wirePath, pressPath], /addCommand|hotkeys|addRibbonIcon|addSettingTab|window\.|globalThis/)).toEqual([]);
+	});
+
+	it("F3: the embed press writes only through the source writer", () => {
+		expect(
+			hits(
+				[wirePath, pressPath],
+				/vault\.(?:process|modify|create|append|delete|rename|trash)|fileManager\.|\.transaction\(|\.replaceRange\(|\.dispatch\(|setCheckboxStatusChar/
+			)
+		).toEqual([]);
+	});
+
+	it("the metadata cache is read only under src/rendered (the handler asks the resolver)", () => {
+		expect(hits([wirePath], /metadataCache/)).toEqual([]);
+	});
+
+	it("the pure domain files stay untouched by this feature: no embed-press import in src/domain", () => {
+		const domain = files(join(root, "src", "domain"));
+		expect(hits(domain, /from ".*(?:embed-press|wire-embed|source-writer)/)).toEqual([]);
+	});
+});
+
 describe("fence regression checks", () => {
 	it("F1: no dashboard, task index or date-marker parsing in src", () => {
 		expect(hits(srcFiles, /📅|🛫|⏳|🎯|TaskItem|task-index/)).toEqual([]);

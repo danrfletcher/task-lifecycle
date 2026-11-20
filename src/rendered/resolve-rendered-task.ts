@@ -119,7 +119,7 @@ function hostView(app: App, el: Element): MarkdownView | null {
  * The text Obsidian drew next to the checkbox: its list item without the
  * checkbox, the bullet and any nested list (the children's own text).
  */
-function renderedTextOf(checkbox: Element): string {
+export function renderedTextOf(checkbox: Element): string {
 	const root = checkbox.closest("li") ?? checkbox.parentElement;
 	if (!root) return "";
 	const clone = root.cloneNode(true) as Element;

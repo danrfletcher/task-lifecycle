@@ -43,7 +43,26 @@ import { findEditorToWrite, type OpenEditor } from "./editor-lookup";
 
 export type { PressKind };
 
-export type PressSkipReason = SkipReason | "disposed";
+/**
+ * What a `LineResolver` says: the line to change, or why none is.
+ *  - `unmappable`: the rendered task is on no line, or on several.
+ *  - `stale`: the rendered status differs from the note's current one;
+ *    `fileStatus` is the char the note has.
+ *  - `disposed`: the caller was shut down while the write was waiting.
+ */
+export type LineResolution =
+	| { line: number }
+	| { skip: "unmappable" | "stale" | "disposed"; fileStatus?: string };
+
+/**
+ * Picks the line to change from the note's lines as they are at write time
+ * (the open editor's own text, or what `vault.process` hands over), so a
+ * line that moved or changed after the click is found again, never guessed.
+ * Must be synchronous and must not write.
+ */
+export type LineResolver = (lines: readonly string[]) => LineResolution;
+
+export type PressSkipReason = SkipReason | "disposed" | "unmappable" | "stale";
 
 export type PressResult =
 	| {
@@ -55,7 +74,12 @@ export type PressResult =
 			from: string;
 			to: string;
 	  }
-	| { status: "skipped"; reason: PressSkipReason };
+	| {
+			status: "skipped";
+			reason: PressSkipReason;
+			/** For `stale`: the status char the note has. */
+			fileStatus?: string;
+	  };
 
 export interface SourceWriterDeps {
 	app: Pick<App, "vault" | "workspace">;
@@ -66,8 +90,12 @@ export interface SourceWriterDeps {
 }
 
 export interface SourceWriter {
-	/** Apply a press to the task on `line` (0-based) of `file`. See the file comment. */
-	press(file: TFile, line: number, kind: PressKind): Promise<PressResult>;
+	/**
+	 * Apply a press to the task on `line` (0-based) of `file`. See the file
+	 * comment. With `resolve`, the line is chosen at write time from the
+	 * note's lines (`line` is then unused) and a skip it returns is the result.
+	 */
+	press(file: TFile, line: number, kind: PressKind, resolve?: LineResolver): Promise<PressResult>;
 	/** Drop writes that have not started. A write already running finishes. */
 	dispose(): void;
 }
@@ -78,6 +106,12 @@ function written(route: "editor" | "vault", edit: LineEdit): PressResult {
 
 function skipped(result: { skipped: SkipReason }): PressResult {
 	return { status: "skipped", reason: result.skipped };
+}
+
+function resolverSkip(skip: Exclude<LineResolution, { line: number }>): PressResult {
+	return skip.fileStatus === undefined
+		? { status: "skipped", reason: skip.skip }
+		: { status: "skipped", reason: skip.skip, fileStatus: skip.fileStatus };
 }
 
 export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
@@ -98,10 +132,14 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 		editor: OpenEditor,
 		line: number,
 		kind: PressKind,
-		stampsOn: boolean
+		stampsOn: boolean,
+		resolve?: LineResolver
 	): PressResult => {
 		// Built from the editor's own text, never from the disk copy.
-		const result = planLineEdit(allLines(editor), line, kind, { stampsOn, today: today() });
+		const lines = allLines(editor);
+		const target = resolve ? resolve(lines) : { line };
+		if (!("line" in target)) return resolverSkip(target);
+		const result = planLineEdit(lines, target.line, kind, { stampsOn, today: today() });
 		if (!("edit" in result)) return skipped(result);
 		const { edit } = result;
 		const scroll = captureEditorScroll(editor as unknown as Editor);
@@ -122,34 +160,49 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 		file: TFile,
 		line: number,
 		kind: PressKind,
-		stampsOn: boolean
+		stampsOn: boolean,
+		resolve?: LineResolver
 	): Promise<PressResult> => {
 		let outcome: LineEditResult | null = null;
+		let refused: PressResult | null = null;
 		await app.vault.process(file, (data) => {
-			const edited = editTextLine(data, line, kind, { stampsOn, today: today() });
+			const target = resolve ? resolve(data.split(/\r\n|\n/)) : { line };
+			if (!("line" in target)) {
+				refused = resolverSkip(target);
+				return data;
+			}
+			const edited = editTextLine(data, target.line, kind, { stampsOn, today: today() });
 			outcome = edited.result;
 			return edited.text;
 		});
+		if (refused) return refused;
 		const result = outcome as LineEditResult | null;
 		if (result && "edit" in result) return written("vault", result.edit);
 		return result ? skipped(result) : { status: "skipped", reason: "not-a-task" };
 	};
 
-	const run = async (file: TFile, line: number, kind: PressKind): Promise<PressResult> => {
+	const run = async (
+		file: TFile,
+		line: number,
+		kind: PressKind,
+		resolve?: LineResolver
+	): Promise<PressResult> => {
 		if (disposed) return { status: "skipped", reason: "disposed" };
 		// Looked up now, not when the press was queued: the note may have been
 		// opened or closed while an earlier write was running.
 		const stampsOn = deps.getSettings().closeStamps;
 		const editor = findEditorToWrite(app as App, file);
-		return editor ? writeToEditor(editor, line, kind, stampsOn) : writeToVault(file, line, kind, stampsOn);
+		return editor
+			? writeToEditor(editor, line, kind, stampsOn, resolve)
+			: writeToVault(file, line, kind, stampsOn, resolve);
 	};
 
 	return {
-		press(file, line, kind) {
+		press(file, line, kind, resolve) {
 			if (disposed) return Promise.resolve({ status: "skipped", reason: "disposed" });
 			const key = file.path;
 			const previous = tails.get(key) ?? Promise.resolve();
-			const result = previous.then(() => run(file, line, kind));
+			const result = previous.then(() => run(file, line, kind, resolve));
 			const tail = result.then(
 				() => undefined,
 				() => undefined

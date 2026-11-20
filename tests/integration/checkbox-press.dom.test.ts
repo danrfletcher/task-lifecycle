@@ -14,7 +14,7 @@ import { EditorState } from "@codemirror/state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TaskLifecyclePlugin from "../../src/main";
 import { STATUS_CHANGED_EVENT } from "../../src/events/event-bus";
-import { editorInfoField, App } from "../__mocks__/obsidian";
+import { editorInfoField, App, Notice } from "../__mocks__/obsidian";
 
 const TODAY = "2026-11-09";
 
@@ -821,11 +821,20 @@ describe("G4: callout bodies rendered as a Live Preview block widget (R1)", () =
 		expect(v.editor.replaceCalls).toBe(0);
 	});
 
-	it("an embed inside the widget (data-line counts another note's lines) is left alone", async () => {
+	it("an embed inside the widget is the embed handler's, not this one's: no write in the host note, native toggle suppressed, G10 notice (embed has no src)", async () => {
+		// The embed press feature (this plan's G1, G10) owns every checkbox inside an
+		// embed. Here the embed has no `src`, so it cannot be mapped: nothing is
+		// written, the native toggle is still suppressed and the notice is shown.
 		const { v, callout } = await calloutRig({ embed: true });
+		Notice.reset();
+		const before = v.editor.doc();
 		const { clk } = physicalClick(callout.checkbox(2), overWidget("top"));
-		expect(clk.defaultPrevented).toBe(false);
+		expect(clk.defaultPrevented).toBe(true);
 		expect(v.editor.replaceCalls).toBe(0);
+		expect(v.editor.doc()).toBe(before);
+		expect(Notice.shown).toEqual([
+			"Task Lifecycle: couldn't find this task's source line, nothing changed",
+		]);
 	});
 
 	it("with Status cycle off a callout click is left to the native toggle", async () => {
@@ -1132,7 +1141,8 @@ describe("unload", () => {
 	it("removes every DOM listener and workspace handler, and clears a pending timer", async () => {
 		rig = await setup([["- [ ] a"]]);
 		const v = rig.views[0];
-		expect(rig.plugin.domListenerCount).toBe(6);
+		// 6 for the editor press handler, 6 for the embed press handler (five pointer/click, one keydown).
+		expect(rig.plugin.domListenerCount).toBe(12);
 		pointer("pointerdown", v.checkbox(0), at(0, 3));
 		expect(vi.getTimerCount()).toBe(1);
 
