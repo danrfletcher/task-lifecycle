@@ -15,7 +15,8 @@
  *    a typed edit (one undo step), and unsaved typing in that editor is never
  *    overwritten, because the new line is built from the editor's own text;
  *  - the note is closed: one `app.vault.process` call writes status and stamp
- *    together. This is the only `vault.process` call in the plugin.
+ *    together. This and the cascade's `process` (below) share the one
+ *    `vault.process` call site in the plugin.
  * Both routes give the same bytes for the same note text.
  *
  * Writes are serialised per file: a press that arrives while an earlier one
@@ -73,6 +74,8 @@ export type PressResult =
 			/** The status char before (raw, e.g. "X") and after. */
 			from: string;
 			to: string;
+			/** The task line as written (status char and stamp), without its line ending. */
+			lineText: string;
 	  }
 	| {
 			status: "skipped";
@@ -96,12 +99,29 @@ export interface SourceWriter {
 	 * note's lines (`line` is then unused) and a skip it returns is the result.
 	 */
 	press(file: TFile, line: number, kind: PressKind, resolve?: LineResolver): Promise<PressResult>;
+	/**
+	 * One atomic `vault.process` of `file` (the close cascade's write to a
+	 * closed note), in the same per-file queue as `press`: it starts after the
+	 * earlier writes on the note finish, and a later `press` waits for it. The
+	 * caller's `fn` does the editing and must return its input to change
+	 * nothing. Rejects with `Error("disposed")` if the writer is shut down
+	 * before it starts, and with whatever `vault.process` rejects with (a
+	 * deleted note); a rejection does not hold up the queue.
+	 */
+	process(file: TFile, fn: (data: string) => string): Promise<void>;
 	/** Drop writes that have not started. A write already running finishes. */
 	dispose(): void;
 }
 
 function written(route: "editor" | "vault", edit: LineEdit): PressResult {
-	return { status: "written", route, line: edit.line, from: edit.from, to: edit.to };
+	return {
+		status: "written",
+		route,
+		line: edit.line,
+		from: edit.from,
+		to: edit.to,
+		lineText: edit.after,
+	};
 }
 
 function skipped(result: { skipped: SkipReason }): PressResult {
@@ -121,6 +141,10 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 
 	/** The last write queued per file path; never rejects. */
 	const tails = new Map<string, Promise<void>>();
+
+	/** The plugin's one call to `vault.process`. */
+	const processNote = (file: TFile, fn: (data: string) => string): Promise<string> =>
+		app.vault.process(file, fn);
 
 	const allLines = (editor: OpenEditor): string[] => {
 		const lines: string[] = [];
@@ -165,7 +189,7 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 	): Promise<PressResult> => {
 		let outcome: LineEditResult | null = null;
 		let refused: PressResult | null = null;
-		await app.vault.process(file, (data) => {
+		await processNote(file, (data) => {
 			const target = resolve ? resolve(data.split(/\r\n|\n/)) : { line };
 			if (!("line" in target)) {
 				refused = resolverSkip(target);
@@ -197,21 +221,32 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 			: writeToVault(file, line, kind, stampsOn, resolve);
 	};
 
+	/** Put `task` behind everything queued on `key`. */
+	const queue = <T>(key: string, task: () => Promise<T>): Promise<T> => {
+		const previous = tails.get(key) ?? Promise.resolve();
+		const result = previous.then(task);
+		const tail = result.then(
+			() => undefined,
+			() => undefined
+		);
+		tails.set(key, tail);
+		void tail.then(() => {
+			if (tails.get(key) === tail) tails.delete(key);
+		});
+		return result;
+	};
+
 	return {
 		press(file, line, kind, resolve) {
 			if (disposed) return Promise.resolve({ status: "skipped", reason: "disposed" });
-			const key = file.path;
-			const previous = tails.get(key) ?? Promise.resolve();
-			const result = previous.then(() => run(file, line, kind, resolve));
-			const tail = result.then(
-				() => undefined,
-				() => undefined
-			);
-			tails.set(key, tail);
-			void tail.then(() => {
-				if (tails.get(key) === tail) tails.delete(key);
+			return queue(file.path, () => run(file, line, kind, resolve));
+		},
+		process(file, fn) {
+			if (disposed) return Promise.reject(new Error("disposed"));
+			return queue(file.path, async () => {
+				if (disposed) throw new Error("disposed");
+				await processNote(file, fn);
 			});
-			return result;
 		},
 		dispose() {
 			disposed = true;

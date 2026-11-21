@@ -44,8 +44,22 @@ export type EmbedPressOutcome =
 	| { status: "written"; route: "editor" | "vault"; from: string; to: string }
 	| { status: "unmappable" }
 	| { status: "stale"; fileStatus: string }
-	/** Nothing to do: the press leaves the status as it is, or the plugin was unloaded. */
-	| { status: "skipped"; reason: "no-change" | "disposed" };
+	/**
+	 * Nothing to do: the press leaves the status as it is, the plugin was
+	 * unloaded, or the "Close subtasks?" dialog is open (a press is ignored).
+	 */
+	| { status: "skipped"; reason: "no-change" | "disposed" | "dialog-open" };
+
+/** A close this module wrote to a closed source note, for the close cascade. */
+export interface RenderedClose {
+	file: TFile;
+	/** 0-based line of the task in the source note. */
+	line: number;
+	/** The task line as written (status char and stamp). */
+	lineText: string;
+	from: string;
+	to: string;
+}
 
 export type EmbedPressBegin =
 	| { handled: false }
@@ -63,6 +77,15 @@ export interface EmbedPresserDeps {
 	writer: Pick<SourceWriter, "press">;
 	/** Show a message to the user. */
 	notify: (message: string) => void;
+	/**
+	 * Called after a press wrote to a note that is not open in any editor. An
+	 * open note is written through its editor, and the change detector reports
+	 * that close itself, so it is never reported here: the cascade would
+	 * otherwise see it twice. The caller decides whether the change is a close.
+	 */
+	onClosedNoteWrite?: (write: RenderedClose) => void;
+	/** True while the "Close subtasks?" dialog is open: a press then writes nothing. Read per press. */
+	isDialogOpen?: () => boolean;
 }
 
 /** `data-task` as the status char: Obsidian leaves it empty for an open task. */
@@ -198,6 +221,9 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 		kind: PressKind
 	): Promise<EmbedPressOutcome> => {
 		const key = path;
+		// The dialog holds the cascade for one task: a press meanwhile is
+		// swallowed by the caller (the native toggle never runs) and does nothing.
+		if (deps.isDialogOpen?.()) return { status: "skipped", reason: "dialog-open" };
 		// A press that follows one still in flight is not compared with the
 		// drawn status: the embed has not caught up with our own earlier write.
 		const queued = (pending.get(key) ?? 0) > 0;
@@ -230,7 +256,18 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 		try {
 			const result = await deps.writer.press(file, 0, kind, resolve);
 			if (disposed) return { status: "skipped", reason: "disposed" };
-			if (result.status === "written") lastWrite.set(taskKey, { from: result.from, to: result.to });
+			if (result.status === "written") {
+				lastWrite.set(taskKey, { from: result.from, to: result.to });
+				if (result.route === "vault") {
+					deps.onClosedNoteWrite?.({
+						file: loc.file,
+						line: result.line,
+						lineText: result.lineText,
+						from: result.from,
+						to: result.to,
+					});
+				}
+			}
 			return finish(checkbox, result);
 		} catch {
 			// The source was deleted or renamed, or the write failed: nothing was written.

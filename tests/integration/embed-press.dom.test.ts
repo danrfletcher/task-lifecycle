@@ -69,6 +69,12 @@ describe("G1 + G5 + GP1 to GP5: the cycle on a closed source", () => {
 			const evt = mouseClick(boxes[0]);
 			expect(evt.defaultPrevented).toBe(true);
 			await settle();
+			// The close (step 2) asks about the subtasks; "Leave open" keeps them as they are.
+			const leave = Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-container button")).find(
+				(b) => b.textContent === "Leave open"
+			);
+			leave?.click();
+			await settle();
 			expect(rig.courseText()).toBe(expected);
 			// The embed shows what the file now has.
 			expect(boxes[0].closest("li")?.getAttribute("data-task")).toBe(shown[i + 1]);

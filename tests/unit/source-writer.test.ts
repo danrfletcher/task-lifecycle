@@ -110,7 +110,7 @@ describe("G8 source routing", () => {
 
 		const r = await writer.press(file("Course.md"), 0, "click");
 
-		expect(r).toEqual({ status: "written", route: "vault", line: 0, from: " ", to: "/" });
+		expect(r).toEqual({ status: "written", route: "vault", line: 0, from: " ", to: "/", lineText: "- [/] Lesson 2 content ^l2" });
 		expect(vault.process).toHaveBeenCalledTimes(1);
 		expect(vault.texts.get("Course.md")).toBe("- [/] Lesson 2 content ^l2\n");
 		expect(other.transaction).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe("G8 source routing", () => {
 
 		const r = await writer.press(file("Course.md"), 1, "click");
 
-		expect(r).toEqual({ status: "written", route: "editor", line: 1, from: " ", to: "/" });
+		expect(r).toEqual({ status: "written", route: "editor", line: 1, from: " ", to: "/", lineText: "- [/] Lesson 2 content ^l2" });
 		expect(ws.getLeavesOfType).toHaveBeenCalledWith("markdown");
 		expect(editor.transaction).toHaveBeenCalledTimes(1);
 		const tx = editor.transaction.mock.calls[0][0];
@@ -153,7 +153,14 @@ describe("G8 source routing", () => {
 		const r = await writer.press(file("Course.md"), 0, "click");
 
 		// The disk line says " " (would give "/"); the editor's says "/" (gives "x").
-		expect(r).toEqual({ status: "written", route: "editor", line: 0, from: "/", to: "x" });
+		expect(r).toEqual({
+			status: "written",
+			route: "editor",
+			line: 0,
+			from: "/",
+			to: "x",
+			lineText: "- [x] newer text in the editor ✅ 2026-11-20 ^l2",
+		});
 		expect(vault.read).not.toHaveBeenCalled();
 		expect(vault.cachedRead).not.toHaveBeenCalled();
 		expect(vault.process).not.toHaveBeenCalled();
@@ -177,7 +184,14 @@ describe("G8 source routing", () => {
 		hold.resolve();
 
 		expect(await first).toMatchObject({ status: "written", route: "vault" });
-		expect(await second).toEqual({ status: "written", route: "editor", line: 0, from: "/", to: "x" });
+		expect(await second).toEqual({
+			status: "written",
+			route: "editor",
+			line: 0,
+			from: "/",
+			to: "x",
+			lineText: "- [x] a ✅ 2026-11-20",
+		});
 		expect(vault.process).toHaveBeenCalledTimes(1);
 	});
 });
@@ -505,6 +519,50 @@ describe("E18 serialised writes", () => {
 		});
 		await expect(writer.press(file("N.md"), 0, "click")).rejects.toThrow("view destroyed");
 		expect(await writer.press(file("N.md"), 0, "click")).toMatchObject({ status: "written" });
+	});
+
+	it("process() joins the press queue: a press queued behind a held process waits for it, in order", async () => {
+		const vault = fakeVault({ "N.md": "- [ ] a\n\t- [ ] b\n" });
+		const { writer } = writerFor(vault, workspace([]));
+		const hold = vault.hold("N.md");
+
+		const cascade = writer.process(file("N.md"), (d) => d.replace("\t- [ ] b", "\t- [x] b"));
+		await tick();
+		const press = writer.press(file("N.md"), 0, "click");
+		await tick();
+		// The press has not started: only the held process call has reached the vault.
+		expect(vault.process).toHaveBeenCalledTimes(1);
+		hold.resolve();
+		await cascade;
+		expect(await press).toMatchObject({ status: "written", lineText: "- [/] a" });
+		expect(vault.texts.get("N.md")).toBe("- [/] a\n\t- [x] b\n");
+	});
+
+	it("process() rejects with the vault's error (a deleted note) and does not hold up the queue", async () => {
+		const vault = fakeVault({ "N.md": "- [ ] a" });
+		vault.process.mockImplementationOnce(async () => {
+			throw new Error("ENOENT");
+		});
+		const { writer } = writerFor(vault, workspace([]));
+		await expect(writer.process(file("N.md"), (d) => d)).rejects.toThrow("ENOENT");
+		expect(await writer.press(file("N.md"), 0, "click")).toMatchObject({ status: "written" });
+	});
+
+	it("process() after dispose rejects with 'disposed' and never reaches the vault; one queued before dispose does too", async () => {
+		const vault = fakeVault({ "N.md": "- [ ] a" });
+		const { writer } = writerFor(vault, workspace([]));
+		const hold = vault.hold("N.md");
+		const running = writer.press(file("N.md"), 0, "click");
+		await tick();
+		const queued = writer.process(file("N.md"), (d) => d + "!");
+		const queuedRejects = expect(queued).rejects.toThrow("disposed");
+		writer.dispose();
+		hold.resolve();
+		await running;
+		await queuedRejects;
+		await expect(writer.process(file("N.md"), (d) => d)).rejects.toThrow("disposed");
+		expect(vault.process).toHaveBeenCalledTimes(1);
+		expect(vault.texts.get("N.md")).toBe("- [/] a");
 	});
 
 	it("dispose() drops queued writes: none runs after unload", async () => {

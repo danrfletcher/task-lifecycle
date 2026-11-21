@@ -154,6 +154,13 @@ export class MockVault {
 		if (text === undefined || this.unreadable.has(file.path)) throw new Error("ENOENT");
 		return text;
 	}
+	/** Like `vault.read`: the stored text; a missing (deleted) file rejects. */
+	async read(file: MockTFile): Promise<string> {
+		this.reads += 1;
+		const text = this.texts.get(file.path);
+		if (text === undefined || this.unreadable.has(file.path)) throw new Error("ENOENT");
+		return text;
+	}
 	/** Paths whose next `process` call waits for the release function `hold` returned. */
 	private gates = new Map<string, Array<Promise<void>>>();
 	/** Make the next `process` call on `path` wait until the returned function is called. */

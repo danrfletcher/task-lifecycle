@@ -6,7 +6,9 @@
  * real `SettingsStore` (in-memory `data.json`) on the mock app; an embed DOM
  * as Obsidian 1.15.1 draws it; real DOM events; a fake source in the mock
  * vault (`vault.process` is recorded in `vault.writes`). The one stand-in is
- * the dialog: `CloseSubtasksDialog` is a spy that answers "close".
+ * the dialog: `CloseSubtasksDialog` is a spy. It answers "leave" by default
+ * (most cases here are about the parent line only, and a closed source now
+ * opens the dialog too); the cascade cases below make it answer "close".
  * The source for most cases is `tests/fixtures/embed-lesson.md` (the `^l2`
  * block of the golden path); the whole-note embed uses
  * `tests/fixtures/embed-all-statuses.md`.
@@ -39,7 +41,7 @@ import {
 import { readingView } from "../helpers/rendered-dom";
 
 const dialog = vi.hoisted(() => ({
-	open: vi.fn(async (_count: number): Promise<"close" | "leave"> => "close"),
+	open: vi.fn(async (_count: number): Promise<"close" | "leave"> => "leave"),
 	closeOpen: vi.fn(),
 }));
 
@@ -66,6 +68,7 @@ afterEach(() => {
 	vi.useRealTimers();
 	document.body.replaceChildren();
 	dialog.open.mockClear();
+	dialog.open.mockImplementation(async () => "leave");
 	dialog.closeOpen.mockClear();
 });
 
@@ -249,6 +252,7 @@ describe("G7 Close stamps and Close cascade: the cascade on an open source", () 
 	async function closeParent(settings: Record<string, boolean>) {
 		const cycle = settings.statusCycle !== false;
 		const stamps = settings.closeStamps !== false;
+		dialog.open.mockImplementation(async () => "close");
 		rig = await makeRig(settings);
 		const from = cycle ? "/" : " ";
 		const text = course(lesson(from));

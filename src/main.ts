@@ -1,6 +1,6 @@
 import { Notice, Plugin } from "obsidian";
 
-import { wireCascade } from "./cascade/wire-cascade";
+import { wireCascade, type WiredCascade } from "./cascade/wire-cascade";
 import { createChangeDetector } from "./editor/change-detector";
 import { TaskLifecycleEvents } from "./events/event-bus";
 import { createEmbedPresser, type EmbedPresser } from "./rendered/embed-press";
@@ -41,7 +41,7 @@ export default class TaskLifecyclePlugin extends Plugin {
 
 	private disposeCheckboxIcons: (() => void) | null = null;
 	private disposeCheckboxPress: (() => void) | null = null;
-	private disposeCascade: (() => void) | null = null;
+	private cascade: WiredCascade | null = null;
 	private disposeEmbedPress: (() => void) | null = null;
 	private embedPresser: EmbedPresser | null = null;
 
@@ -70,23 +70,38 @@ export default class TaskLifecyclePlugin extends Plugin {
 			app: this.app,
 			settings: this.settings,
 		});
-		this.disposeCascade = wireCascade({
-			plugin: this,
-			app: this.app,
-			settings: this.settings,
-			events: this.events,
-		});
 		const writer = createSourceWriter({
 			app: this.app,
 			getSettings: () => this.settings.get(),
 		});
 		this.sourceWriter = writer;
+		const notify = (message: string): void => {
+			new Notice(message);
+		};
+		const cascade = wireCascade({
+			plugin: this,
+			app: this.app,
+			settings: this.settings,
+			events: this.events,
+			writer,
+			notify,
+		});
+		this.cascade = cascade;
 		this.embedPresser = createEmbedPresser({
 			app: this.app,
 			writer,
-			notify: (message) => {
-				new Notice(message);
-			},
+			notify,
+			// An open note's close reaches the cascade through the change
+			// detector; only a write to a closed note is reported here.
+			onClosedNoteWrite: (write) =>
+				cascade.reportClose({
+					file: write.file,
+					line: write.line,
+					lineText: write.lineText,
+					from: write.from,
+					to: write.to,
+				}),
+			isDialogOpen: () => cascade.isDialogOpen(),
 		});
 		this.disposeEmbedPress = wireEmbedPress({
 			plugin: this,
@@ -104,8 +119,8 @@ export default class TaskLifecyclePlugin extends Plugin {
 		this.embedPresser = null;
 		this.sourceWriter?.dispose();
 		this.sourceWriter = null;
-		this.disposeCascade?.();
-		this.disposeCascade = null;
+		this.cascade?.dispose();
+		this.cascade = null;
 		this.disposeCheckboxPress?.();
 		this.disposeCheckboxPress = null;
 		this.disposeCheckboxIcons?.();

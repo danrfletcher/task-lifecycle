@@ -313,7 +313,7 @@ describe.each(POINTERS)("G2 + G3, %s: gestures on an embedded checkbox", (pointe
 		expect(Notice.shown).toEqual([]);
 	});
 
-	it("G3: a hold on a parent with open subtasks cancels the parent and leaves the subtasks as they are", async () => {
+	it("G3: a hold on a parent with open subtasks cancels the parent, asks about the 2 subtasks, and leaves them as they are until confirmed", async () => {
 		rig = await makeRig();
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
 		down(boxes[0], pointerType);
@@ -324,8 +324,8 @@ describe.each(POINTERS)("G2 + G3, %s: gestures on an embedded checkbox", (pointe
 		expect(rig.courseText()).toBe(LESSON_CANCELLED);
 		expect(boxes[1].closest("li")?.getAttribute("data-task")).toBe(" ");
 		expect(boxes[2].closest("li")?.getAttribute("data-task")).toBe(" ");
-		// No dialog from this hold (the cascade dialog is a later slice).
-		expect(document.querySelector(".modal-container")).toBeNull();
+		// The parent is written first, then the dialog asks (the cascade, PR-6).
+		expect(document.querySelector(".modal-container")?.textContent).toContain("This task has 2 open subtasks.");
 	});
 });
 
