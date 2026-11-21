@@ -184,15 +184,39 @@ body.task-lifecycle-checkboxes
 	font-weight: 600;
 }
 
-/* [-] cancelled: struck through and dimmed */
-body.task-lifecycle-checkboxes .HyperMD-task-line[data-task="-"],
-body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
+/* [-] cancelled: struck through and dimmed. In the editor the line is the
+   task, so the whole line takes the look. */
+body.task-lifecycle-checkboxes .HyperMD-task-line[data-task="-"] {
 	color: var(--lines, var(--text-faint));
 	text-decoration: line-through !important;
 	text-decoration-thickness: inherit;
 	text-decoration-color: currentColor;
 	opacity: 0.8;
 	font-weight: inherit;
+}
+
+/* A rendered item holds its whole subtree, so the look above would reach the
+   open subtasks of a cancelled task, and a child cannot undo opacity or a
+   strike it inherits. So the rendered item gets the dim as colour only (no
+   opacity) and the strike, and its nested lists are cut off from both:
+   the colour is set back, and a text decoration is not carried into an
+   inline-block, so the strike stays on the item's own text. A cancelled
+   subtask is still struck and dimmed by this same rule on itself. */
+body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
+	color: var(--lines, var(--text-faint));
+	text-decoration: line-through !important;
+	text-decoration-thickness: inherit;
+	text-decoration-color: currentColor;
+	font-weight: inherit;
+}
+
+body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] > ul,
+body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] > ol {
+	display: inline-block;
+	box-sizing: border-box;
+	width: 100%;
+	vertical-align: top;
+	color: var(--text-normal);
 }
 
 /* A hold on a rendered checkbox (in an embed or in Reading view) cancels the

@@ -266,12 +266,15 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		void handle.run(shortKind()).catch(() => undefined);
 	};
 
-	const opts = { capture: true };
-	/** Documents that already carry the listeners: one set per document, never two. */
-	const wired = new Set<Document>();
+	/** Documents that already carry the listeners, each with the signal that removes them. */
+	const wired = new Map<Document, AbortController>();
 	const attach = (doc: Document): void => {
 		if (wired.has(doc)) return;
-		wired.add(doc);
+		const gate = new AbortController();
+		wired.set(doc, gate);
+		// `signal` lets one popout's listeners go when its window closes; the
+		// plugin still drops all of them on unload.
+		const opts = { capture: true, signal: gate.signal };
 		plugin.registerDomEvent(doc, "pointerdown", onPointerDown, opts);
 		plugin.registerDomEvent(doc, "pointermove", onPointerMove, opts);
 		plugin.registerDomEvent(doc, "pointerup", onPointerUp, opts);
@@ -279,6 +282,19 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		plugin.registerDomEvent(doc, "contextmenu", onContextMenu, opts);
 		plugin.registerDomEvent(doc, "click", onClick, opts);
 		plugin.registerDomEvent(doc, "keydown", onKeyDown, opts);
+	};
+	/** A popout window closed: its listeners go, and nothing keeps its document alive. */
+	const detach = (doc: Document): void => {
+		const gate = wired.get(doc);
+		if (!gate || doc === mainDoc) return;
+		gate.abort();
+		wired.delete(doc);
+		// A press that started in that window will never see its pointerup.
+		if (active && active.box.ownerDocument === doc) {
+			run((c) => c.cancel());
+			active = null;
+			released = null;
+		}
 	};
 	attach(mainDoc);
 
@@ -292,6 +308,11 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 		plugin.registerEvent(
 			workspace.on("window-open", (_win, popout: Window) => {
 				if (popout?.document) attach(popout.document);
+			})
+		);
+		plugin.registerEvent(
+			workspace.on("window-close", (_win, popout: Window) => {
+				if (popout?.document) detach(popout.document);
 			})
 		);
 	}

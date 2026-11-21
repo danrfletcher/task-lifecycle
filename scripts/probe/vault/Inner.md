@@ -1,0 +1,2 @@
+Inner:
+![[Course#^l2]]

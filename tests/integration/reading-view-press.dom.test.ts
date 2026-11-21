@@ -816,6 +816,35 @@ describe("E3 + E16: several panes showing one task", () => {
 		expect(Notice.shown).toEqual([]);
 	});
 
+	it("a box whose text differs from the pressed one is never located: the press costs the same with 30 more unrelated boxes on the page", async () => {
+		const pressWithExtraBoxes = async (extra: number): Promise<{ locates: number; twin: string | null | undefined }> => {
+			await closedCourse();
+			const own = openOwnReading(rig);
+			hostToReading(rig);
+			const embedded = embedInReading(rig, "Course#^l2", [lessonSection()]);
+			for (let i = 0; i < extra; i++) {
+				document.body.append(readingView([[task(`Unrelated ${i} `, 0)]]).el);
+			}
+			// Locating a box asks the workspace for its host view: count those asks.
+			const asks = vi.spyOn(rig.app.workspace, "getLeavesOfType");
+			mouseClick(embedded.boxes[1]);
+			await settle();
+			const locates = asks.mock.calls.length;
+			asks.mockRestore();
+			expect(rig.app.vault.writes).toHaveLength(1);
+			return { locates, twin: status(own.boxes[1]) };
+		};
+		const few = await pressWithExtraBoxes(0);
+		rig.plugin.unload();
+		document.body.replaceChildren();
+		const many = await pressWithExtraBoxes(30);
+		// The twin in the own Reading view is still found and redrawn ...
+		expect(few.twin).toBe("/");
+		expect(many.twin).toBe("/");
+		// ... and the 30 other boxes added no locate.
+		expect(many.locates).toBe(few.locates);
+	});
+
 	it("E16 popout: a Reading view in a popout window is handled as in the main window, once", async () => {
 		await closedCourse();
 		const popout = new Window();
@@ -850,6 +879,35 @@ describe("E3 + E16: several panes showing one task", () => {
 		expect(rig.app.vault.writes).toEqual(["process:Course.md"]);
 		expect(status(watch)).toBe("/");
 		expect(Notice.shown).toEqual([]);
+	});
+
+	it("E16 popout closed: its listeners are removed, the main window's stay, and a window that opens later is wired again", async () => {
+		await closedCourse();
+		const mainCount = rig.plugin.domListenerCount;
+		const popout = new Window();
+		rig.app.workspace.trigger("window-open", {}, popout);
+		expect(rig.plugin.domListenerCount).toBe(mainCount + 7);
+		const doc = popout.document as unknown as Document;
+		const spy = vi.spyOn(doc, "removeEventListener");
+
+		rig.app.workspace.trigger("window-close", {}, popout);
+
+		expect(rig.plugin.domListenerCount).toBe(mainCount);
+		expect([...new Set(spy.mock.calls.map((c) => c[0]))].sort()).toEqual(
+			["click", "contextmenu", "keydown", "pointercancel", "pointerdown", "pointermove", "pointerup"]
+		);
+		// A closed window sends nothing, so a press there is nobody's; closing twice is harmless.
+		rig.app.workspace.trigger("window-close", {}, popout);
+		expect(rig.plugin.domListenerCount).toBe(mainCount);
+		// Closing a window the plugin never wired changes nothing.
+		rig.app.workspace.trigger("window-close", {}, new Window());
+		expect(rig.plugin.domListenerCount).toBe(mainCount);
+		// The same Window object opened again gets its set back, once.
+		rig.app.workspace.trigger("window-open", {}, popout);
+		expect(rig.plugin.domListenerCount).toBe(mainCount + 7);
+		// Unload still removes everything, and the already-removed ones are not removed twice.
+		rig.plugin.unload();
+		expect(rig.plugin.domListenerCount).toBe(0);
 	});
 
 	it("E16 popout windows that were already open when the plugin wired up are found from the workspace", async () => {

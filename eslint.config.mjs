@@ -7,7 +7,9 @@ import { defineConfig } from "eslint/config";
 export default defineConfig([
   // 0. Global ignores
   {
-    ignores: ["node_modules/**", "main.js", "coverage/**"],
+    // scripts/probe/eval/*.js run inside a throwaway Obsidian (`app` is its
+    // global), not in the plugin or in Node.
+    ignores: ["node_modules/**", "main.js", "coverage/**", "scripts/probe/eval/**"],
   },
 
   // 1. Obsidian recommended rules

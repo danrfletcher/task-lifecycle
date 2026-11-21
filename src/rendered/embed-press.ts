@@ -156,19 +156,36 @@ export function syncRenderedStatus(checkbox: Element, status: string): void {
 	(checkbox as HTMLInputElement).checked = status !== " ";
 }
 
-/** Other embeds on the page that show this same task (same `src`, `data-line` and text). */
-function twinsOf(checkbox: Element): Element[] {
-	const embed = checkbox.closest(".internal-embed, .markdown-embed");
-	const src = embed?.getAttribute("src");
-	const line = checkbox.getAttribute("data-line");
-	if (!embed || !src || line === null) return [];
-	const text = renderedTextOf(checkbox);
+/** The note lines a press resolved against, and the line it placed the task on. */
+interface PlacedTask {
+	path: string;
+	lines: readonly string[];
+	line: number;
+}
+
+/**
+ * Every other rendered checkbox on the page that shows the task on `placed`.
+ *
+ * Found by where each one resolves, not by how its embed is written: an embed
+ * of the same task as `Course#^l2`, `Course.md#^l2`, `folder/Course#^l2`, a
+ * heading embed that holds it, or the note's own Reading view all count. Each
+ * candidate is located with the same rules as a click and placed on the
+ * lines the press used, so a task that does not resolve to exactly that line
+ * (several equal lines, another note) is never taken for a twin.
+ *
+ * A twin draws the same line, so it has the pressed box's rendered text. Any
+ * other box is skipped on that comparison alone, before it is located: in a
+ * note's own Reading view every box is in the same file, and locating and
+ * placing each one would match the whole note once per box on every press.
+ */
+function twinsOf(app: App, checkbox: Element, placed: PlacedTask): Element[] {
 	const out: Element[] = [];
-	for (const other of Array.from(checkbox.ownerDocument.querySelectorAll(".internal-embed, .markdown-embed"))) {
-		if (other === embed || other.getAttribute("src") !== src) continue;
-		for (const box of Array.from(other.querySelectorAll("input.task-list-item-checkbox"))) {
-			if (box.getAttribute("data-line") === line && renderedTextOf(box) === text) out.push(box);
-		}
+	const text = renderedTextOf(checkbox);
+	for (const other of Array.from(checkbox.ownerDocument.querySelectorAll("input.task-list-item-checkbox"))) {
+		if (other === checkbox || renderedTextOf(other) !== text) continue;
+		const located = locateRenderedTask(app, other);
+		if (!("located" in located) || located.located.file.path !== placed.path) continue;
+		if (placeTask(placed.lines, located.located)?.line === placed.line) out.push(other);
 	}
 	return out;
 }
@@ -180,14 +197,15 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 	/** The last status change this plugin wrote per task (path + rendered text). */
 	const lastWrite = new Map<string, { from: string; to: string }>();
 
-	const drawEverywhere = (checkbox: Element, status: string): void => {
+	const drawEverywhere = (checkbox: Element, status: string, placed: PlacedTask | null): void => {
 		syncRenderedStatus(checkbox, status);
-		for (const twin of twinsOf(checkbox)) syncRenderedStatus(twin, status);
+		if (!placed) return;
+		for (const twin of twinsOf(deps.app as App, checkbox, placed)) syncRenderedStatus(twin, status);
 	};
 
-	const finish = (checkbox: Element, result: PressResult): EmbedPressOutcome => {
+	const finish = (checkbox: Element, result: PressResult, placed: PlacedTask | null): EmbedPressOutcome => {
 		if (result.status === "written") {
-			drawEverywhere(checkbox, result.to);
+			drawEverywhere(checkbox, result.to, placed);
 			return { status: "written", route: result.route, from: result.from, to: result.to };
 		}
 		switch (result.reason) {
@@ -198,7 +216,7 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 			case "stale": {
 				const fileStatus = result.fileStatus ?? " ";
 				deps.notify(STALE_NOTICE);
-				drawEverywhere(checkbox, fileStatus);
+				drawEverywhere(checkbox, fileStatus, placed);
 				return { status: "stale", fileStatus };
 			}
 			default:
@@ -245,11 +263,17 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 		// Obsidian renames by changing the same TFile's `path`, so a held TFile is
 		// not proof it is still the note that was clicked: it must still be at the
 		// clicked path, and the vault must still map that path to it.
+		// The lines the write was decided on, and where the task is in them: the
+		// other drawings of the same task are found against these.
+		let placed: PlacedTask | null = null;
 		const resolve: LineResolver = (lines) => {
 			if (disposed) return { skip: "disposed" };
 			if (file.path !== path || deps.app.vault.getAbstractFileByPath(path) !== file) {
 				return { skip: "unmappable" };
 			}
+			// Also on a stale answer: the embed is redrawn to what the file has.
+			const at = placeTask(lines, loc);
+			placed = at ? { path, lines, line: at.line } : null;
 			return place(lines);
 		};
 		pending.set(key, (pending.get(key) ?? 0) + 1);
@@ -268,7 +292,7 @@ export function createEmbedPresser(deps: EmbedPresserDeps): EmbedPresser {
 					});
 				}
 			}
-			return finish(checkbox, result);
+			return finish(checkbox, result, placed);
 		} catch {
 			// The source was deleted or renamed, or the write failed: nothing was written.
 			return unmappable();

@@ -17,6 +17,12 @@ export interface CmEditor extends OpenEditor {
 	getValue(): string;
 }
 
+/** A position as Obsidian's editor gives it: 0-based line and column. */
+export interface EditorPos {
+	line: number;
+	ch: number;
+}
+
 export interface CmEditorHandle {
 	editor: CmEditor;
 	/** The current document text. */
@@ -26,6 +32,10 @@ export interface CmEditorHandle {
 	undo(): boolean;
 	/** Typed input at the end of line `line` (a user edit, not a press). */
 	type(line: number, text: string): void;
+	/** Put the selection from `anchor` to `head` (a caret when `head` is left out). */
+	select(anchor: EditorPos, head?: EditorPos): void;
+	/** The selection as it is now. */
+	selection(): { anchor: EditorPos; head: EditorPos };
 	/** Every `status-changed` event the detector emitted. */
 	events: Array<{ line: number; from: string; to: string }>;
 	/** Calls to `editor.transaction`. */
@@ -63,6 +73,10 @@ export function makeCmEditor(
 	});
 
 	const offset = (pos: { line: number; ch: number }) => state.doc.line(pos.line + 1).from + pos.ch;
+	const posOf = (at: number): EditorPos => {
+		const line = state.doc.lineAt(at);
+		return { line: line.number - 1, ch: at - line.from };
+	};
 	const transactions: CmEditorHandle["transactions"] = [];
 
 	const editor: CmEditor = {
@@ -99,6 +113,13 @@ export function makeCmEditor(
 				changes: { from: end, insert: text },
 				userEvent: "input.type",
 			}).state;
+		},
+		select(anchor, head = anchor) {
+			state = state.update({ selection: { anchor: offset(anchor), head: offset(head) } }).state;
+		},
+		selection() {
+			const { anchor, head } = state.selection.main;
+			return { anchor: posOf(anchor), head: posOf(head) };
 		},
 		events,
 		bus,

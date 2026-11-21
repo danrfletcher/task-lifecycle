@@ -117,13 +117,20 @@ function hostView(app: App, el: Element): MarkdownView | null {
 
 /**
  * The text Obsidian drew next to the checkbox: its list item without the
- * checkbox, the bullet and any nested list (the children's own text).
+ * checkbox, the bullet and any nested list (the children's own text). Footnote
+ * references (drawn as a number that depends on the whole note) and typeset
+ * math (drawn as glyphs plus hidden MathML) are left out; the source side
+ * drops `[^id]` and `$...$` to match.
  */
 export function renderedTextOf(checkbox: Element): string {
 	const root = checkbox.closest("li") ?? checkbox.parentElement;
 	if (!root) return "";
 	const clone = root.cloneNode(true) as Element;
-	clone.querySelectorAll("ul, ol, input, .list-bullet, .collapse-indicator").forEach((n) => n.remove());
+	clone
+		.querySelectorAll(
+			"ul, ol, input, .list-bullet, .collapse-indicator, sup.footnote-ref, sup[data-footnote-id], .math, mjx-container"
+		)
+		.forEach((n) => n.remove());
 	return clone.textContent ?? "";
 }
 

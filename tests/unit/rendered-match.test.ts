@@ -55,6 +55,32 @@ describe("normalizeSourceTaskText: what the content check strips (E17)", () => {
 		["an inline field in parentheses", "- [ ] Pay (due:: 2026-11-30) now", "Pay now"],
 		["a html tag", "- [ ] A <b>tagged</b> word", "A tagged word"],
 		["an escaped star", "- [ ] Five \\* stars", "Five * stars"],
+		["a code span holding bold syntax is drawn literally", "- [ ] Use `**x**` here", "Use **x** here"],
+		["a code span holding italic stars", "- [ ] Use `*a*` and `*b*`", "Use *a* and *b*"],
+		["a code span holding underscores", "- [ ] Use `_a_` here", "Use _a_ here"],
+		["a code span holding a wikilink", "- [ ] Type `[[Note]]` now", "Type [[Note]] now"],
+		["a code span holding a html tag", "- [ ] Type `<b>x</b>` now", "Type <b>x</b> now"],
+		["emphasis around a code span", "- [ ] A **`code`** word", "A code word"],
+		["a code span next to real bold", "- [ ] `*a*` and **b**", "*a* and b"],
+		["an escaped star pair", "- [ ] Say \\*a\\* now", "Say *a* now"],
+		["an escaped underscore pair", "- [ ] Say \\_a\\_ now", "Say _a_ now"],
+		["an escaped bracket is not a link", "- [ ] See \\[a\\](b) now", "See [a](b) now"],
+		["an escaped backtick does not open a code span", "- [ ] A \\`**b**\\` word", "A `b` word"],
+		["a backslash inside a code span stays", "- [ ] Path `a\\*b` here", "Path a\\*b here"],
+		["a private-use character in the source is ignored", "- [ ] A\uE000 `x` B", "A x B"],
+		["a footnote reference", "- [ ] Call Sam[^1] today", "Call Sam today"],
+		["a named footnote reference", "- [ ] Call Sam[^note] today", "Call Sam today"],
+		["an inline footnote", "- [ ] Call Sam^[see notes] today", "Call Sam today"],
+		["a footnote reference at the end", "- [ ] Call Sam[^1] ^t1", "Call Sam"],
+		["a footnote reference held in a code span stays", "- [ ] Type `[^1]` now", "Type [^1] now"],
+		["an escaped footnote reference is not a footnote", "- [ ] See \\[^1] now", "See [^1] now"],
+		["inline math", "- [ ] Solve $x^2 + 1$ today", "Solve today"],
+		["inline math at the end", "- [ ] Prove $a_1 * b_1$", "Prove"],
+		["display math inside a task", "- [ ] Show $$\\sum_i x_i$$ holds", "Show holds"],
+		["two prices are not math", "- [ ] Costs $5 and $6", "Costs $5 and $6"],
+		["a lone dollar is not math", "- [ ] Pay $ now", "Pay $ now"],
+		["an escaped dollar pair is not math", "- [ ] Pay \\$a and \\$b", "Pay $a and $b"],
+		["math held in a code span stays", "- [ ] Type `$x$` now", "Type $x$ now"],
 		["a snake_case word (no italics)", "- [ ] Fix some_var_name today", "Fix some_var_name today"],
 		["a hash tag", "- [ ] Call #urgent", "Call #urgent"],
 		["extra whitespace", "- [ ]   spaced \t  out  ", "spaced out"],
@@ -112,6 +138,13 @@ describe("matchRenderedTask: one source line or a verdict", () => {
 		expect(matchRenderedTask(fixture, rendered, WHOLE)).toEqual({
 			line: lineOf("- [ ] Bold **word**"),
 		});
+	});
+
+	it("matches a task whose code span holds markdown, and an escaped star pair, to what Obsidian draws", () => {
+		const lines = ["- [ ] Use `**x**` here ^c1", "- [ ] Say \\*a\\* now", "- [ ] Use x here"];
+		expect(matchRenderedTask(lines, "Use **x** here", WHOLE)).toEqual({ line: 0 });
+		expect(matchRenderedTask(lines, "Say *a* now", WHOLE)).toEqual({ line: 1 });
+		expect(matchRenderedTask(lines, "Use x here", WHOLE)).toEqual({ line: 2 });
 	});
 
 	it("keeps a bare emoji in the comparison", () => {
