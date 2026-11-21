@@ -10,6 +10,7 @@ import {
 	removeStamps,
 } from "../../src/domain/stamps";
 import { STATUS_SEQUENCE, nextStatus } from "../../src/domain/status-sequence";
+import { REJECTED_LEAF_TYPES, REJECTED_SURFACE_CLASSES } from "../../src/status-cycle/checkbox-hit-test";
 
 const root = join(__dirname, "..", "..");
 
@@ -317,5 +318,106 @@ describe("fence regression checks", () => {
 		expect(removeStamps.length).toBe(1);
 		expect(addStamp.length).toBe(3);
 		expect(applyStampTransition.length).toBe(4);
+	});
+});
+
+/** `hits` without the lines that are only a comment: prose may name what the code must not do. */
+function codeHits(paths: string[], re: RegExp): string[] {
+	return hits(paths, re).filter((h) => !/^[^:]+:\d+:\s*(?:\*|\/\/|\/\*)/.test(h));
+}
+
+describe("Reading view fence (F2, F4, F5, F8)", () => {
+	const hitTestPath = join(root, "src", "status-cycle", "checkbox-hit-test.ts");
+	const resolverPath = join(root, "src", "rendered", "resolve-rendered-task.ts");
+	const wirePath = join(root, "src", "status-cycle", "wire-embed-press.ts");
+	const editorWirePath = join(root, "src", "status-cycle", "wire-checkbox-press.ts");
+	const nonSrc = ["styles.css", "package.json", "manifest.json"].map((f) => join(root, f));
+
+	it("the files exist, so the rules below are not vacuous", () => {
+		for (const p of [hitTestPath, resolverPath, wirePath, editorWirePath]) expect(read(p).length).toBeGreaterThan(0);
+		expect(srcFiles.length).toBeGreaterThan(10);
+	});
+
+	it("F2: the modify-watcher rule catches what it is meant to catch", () => {
+		const rule = /vault\.modify|vault\.append|vault\.on\(\s*["']modify["']|modifyHeadless|onStatusChanged/;
+		for (const bad of ['app.vault.on("modify", f)', "vault.on( 'modify', f)", "await vault.modify(file, x)", "vault.append(f, s)"]) {
+			expect(rule.test(bad)).toBe(true);
+		}
+		const watcher = /\.on\(\s*["'](?:modify|changed|create|delete|rename)["']/;
+		expect(watcher.test('app.metadataCache.on("changed", cb)')).toBe(true);
+		expect(hits(srcFiles, watcher)).toEqual([]);
+	});
+
+	it("F4: the embed handler asks the rendered-surface gate; it never tests Reading view or an embed on its own", () => {
+		const src = read(wirePath);
+		expect(src).toMatch(/isRenderedTaskSurface\(path\)/);
+		expect(src).not.toMatch(/isInReadingView|isInLivePreview|isInsideEmbed/);
+	});
+
+	it("F4: the editor press handler never accepts a Reading view", () => {
+		expect(read(editorWirePath)).not.toMatch(/isInReadingView|isRenderedTaskSurface|markdown-reading-view/);
+	});
+
+	it("F4: only the hit-test and the resolver name the Reading view; no other module names a surface", () => {
+		const others = srcFiles.filter((p) => p !== hitTestPath && p !== resolverPath);
+		expect(hits(others, /markdown-reading-view|markdown-preview-view/)).toEqual([]);
+		expect(codeHits(others, /canvas|search-result|backlink|hover-popover|block-language|plugin-tasks-query/)).toEqual([]);
+	});
+
+	it("F4: the gate's rejected containers and the resolver's unsupported surfaces are one list", () => {
+		const block = read(resolverPath).match(/const UNSUPPORTED_SURFACE = \[([\s\S]*?)\]\.join/);
+		expect(block).not.toBeNull();
+		const entries = Array.from(block![1].matchAll(/^\s*(["'])(.+)\1,?\s*$/gm), (m) => m[2]);
+		expect(entries.length).toBeGreaterThanOrEqual(10);
+		const classes = entries.filter((e) => /^\.[\w-]+$/.test(e)).map((e) => e.slice(1));
+		const leafTypes = entries
+			.map((e) => e.match(/^\.workspace-leaf-content\[data-type="([\w-]+)"\]$/)?.[1])
+			.filter((t): t is string => t !== undefined);
+		// Every entry is one of the two shapes, so nothing was skipped by the parsing above.
+		expect(classes.length + leafTypes.length).toBe(entries.length);
+		expect([...classes].sort()).toEqual([...REJECTED_SURFACE_CLASSES].sort());
+		expect([...leafTypes].sort()).toEqual([...REJECTED_LEAF_TYPES].sort());
+	});
+
+	it("F4: the surfaces Reading view may add are exactly the Reading view and embeds in Live Preview", () => {
+		const gate = read(hitTestPath);
+		const body = gate.slice(gate.indexOf("export function isRenderedTaskSurface"));
+		expect(body).toMatch(/isInReadingView\(path\) \|\| \(isInLivePreview\(path\) && isInsideEmbed\(path\)\)/);
+		expect(body).toMatch(/if \(isInRejectedSurface\(path\)\) return false/);
+		expect(gate).toMatch(/hasClass\(el, "markdown-reading-view"\)/);
+		expect(gate).toMatch(/hasClass\(el, "is-live-preview"\)/);
+		expect(gate).toMatch(/hasClass\(el, "internal-embed"\) \|\| hasClass\(el, "markdown-embed"\)/);
+	});
+
+	it("F5: src/main.ts exports only the plugin class, and no module sets a global, a window property or an API object", () => {
+		const exports = read(join(root, "src", "main.ts")).split("\n").filter((l) => /^export\s/.test(l));
+		expect(exports).toEqual(["export default class TaskLifecyclePlugin extends Plugin {"]);
+		expect(codeHits(srcFiles, /(?<![\w-])(?:window|activeWindow|globalThis|self)\.\w+\s*=[^=]/)).toEqual([]);
+		expect(codeHits(srcFiles, /plugins\.plugins|\.api\s*=|exposeApi/)).toEqual([]);
+	});
+
+	it("F5: no workspace.trigger, no document or window event dispatched, no agile:-style event, in any module under src", () => {
+		expect(
+			codeHits(srcFiles, /workspace\.trigger|document\.dispatchEvent|window\.dispatchEvent|\.dispatchEvent\(|\bagile:|app\.workspace\.trigger/)
+		).toEqual([]);
+		// The plugin's own bus is internal: its only event name is task-lifecycle:*.
+		const names = Array.from(read(join(root, "src", "events", "event-bus.ts")).matchAll(/["']([\w-]+:[\w-]+)["']/g), (m) => m[1]);
+		expect(names.length).toBeGreaterThan(0);
+		for (const name of names) expect(name).toMatch(/^task-lifecycle:/);
+	});
+
+	it("F5: the repository contains no classroom path or import", () => {
+		const docs = [join(root, "README.md"), ...files(join(root, "docs"))];
+		expect(hits([...srcFiles, ...nonSrc, ...docs], /classroom/i)).toEqual([]);
+		expect(hits([...srcFiles, ...files(join(root, "tests", "fixtures"))], /Developer\/agents|agents\/tools/)).toEqual([]);
+	});
+
+	it("F8: no dashboard, query, recurrence, or due/start/scheduled/created date handling in src, styles.css or manifest.json", () => {
+		const paths = [...srcFiles, join(root, "styles.css"), join(root, "manifest.json")];
+		expect(
+			codeHits(paths, /📅|🛫|⏳|➕|🔁|\b(?:due|start|scheduled|created)(?:Date|At)\b|\brecurrence\b|\brrule\b|\bdashboard\b|\bTaskQuery\b|\bquery(?:Parser|Engine)\b/i)
+		).toEqual([]);
+		// A date field is never read or parsed: no field-name literal for one outside comments.
+		expect(codeHits(paths, /["'`](?:due|start|scheduled|created)::?["'`]/i)).toEqual([]);
 	});
 });

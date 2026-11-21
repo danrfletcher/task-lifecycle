@@ -105,6 +105,7 @@ export default class TaskLifecyclePlugin extends Plugin {
 		});
 		this.disposeEmbedPress = wireEmbedPress({
 			plugin: this,
+			workspace: this.app.workspace,
 			presser: this.embedPresser,
 			settings: this.settings,
 		});

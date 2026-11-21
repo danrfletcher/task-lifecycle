@@ -1,11 +1,14 @@
 /**
- * Live Preview embed checkbox press: DOM wiring.
+ * Rendered checkbox press: DOM wiring.
  *
- * A short click on a task checkbox inside an embed (`![[Note#^block]]`,
- * `![[Note#Heading]]`, `![[Note]]`) advances the status of the task in its
- * SOURCE note (` ` -> `/` -> `x` -> `-` -> ` `) and stamps or unstamps it as
- * an editor tick would. Obsidian's own toggle, which writes a bare `[x]`,
- * never also runs.
+ * A short click on a task checkbox that Obsidian draws outside the live
+ * editor advances the status of the task in its SOURCE note (` ` -> `/` ->
+ * `x` -> `-` -> ` `) and stamps or unstamps it as an editor tick would.
+ * Obsidian's own toggle, which writes a bare `[x]`, never also runs. The
+ * surfaces are those of `isRenderedTaskSurface`: an embed (`![[Note#^block]]`,
+ * `![[Note#Heading]]`, `![[Note]]`) in Live Preview, and a note's own Reading
+ * view with any embed in it. Canvas, hover previews, search, backlinks and
+ * query renderings are left to Obsidian (F4).
  *
  * The click is the trigger, because it is the one event a mouse, a tap and
  * the keyboard (Space on a focused box) all send:
@@ -53,17 +56,23 @@
  * so a flip of the setting during a press changes the next press only: the
  * press in progress is neither dropped nor written twice.
  */
-import type { Plugin } from "obsidian";
+import type { Plugin, Workspace } from "obsidian";
 
 import { CLICK_SWALLOW_MS } from "../domain/constants";
 import type { EmbedPressBegin, EmbedPresser } from "../rendered/embed-press";
 import type { PressKind } from "../rendered/source-writer";
 import type { SettingsStore } from "../settings/settings";
-import { isInLivePreview, isInsideEmbed, isNonCheckboxTarget, type PathElement } from "./checkbox-hit-test";
+import { isNonCheckboxTarget, isRenderedTaskSurface, type PathElement } from "./checkbox-hit-test";
 import { PressController, type PressOutput } from "./press-controller";
 
 export interface EmbedPressDeps {
-	plugin: Pick<Plugin, "registerDomEvent">;
+	plugin: Pick<Plugin, "registerDomEvent" | "registerEvent">;
+	/**
+	 * The workspace, to hear popout windows open (`window-open`) and to find
+	 * the ones already open. A popout has its own `document`, which the
+	 * listeners on the main one never see.
+	 */
+	workspace?: Pick<Workspace, "on" | "getLeavesOfType">;
 	presser: EmbedPresser;
 	/** Read per press (never cached), so a toggle applies to boxes already on screen. */
 	settings: Pick<SettingsStore, "get">;
@@ -98,9 +107,11 @@ function eventPath(evt: Event): PathElement[] {
 }
 
 /**
- * The checkbox an event is on, when it is the task checkbox itself inside an
- * embed in a Live Preview editor. Null for anything else (a link, the title,
- * a chevron, a bullet, the `li` padding, a checkbox outside an embed).
+ * The checkbox an event is on, when it is the task checkbox itself on a
+ * surface `isRenderedTaskSurface` accepts (an embed in Live Preview, or a
+ * note's Reading view). Null for anything else (a link, the title, a
+ * chevron, a bullet, the `li` padding, a checkbox in the editor itself, in a
+ * canvas card, a hover preview, a search result, ...).
  */
 function embedCheckbox(evt: Event): Element | null {
 	const target = evt.target;
@@ -108,7 +119,7 @@ function embedCheckbox(evt: Event): Element | null {
 	if (target.tagName !== "INPUT" || (target as HTMLInputElement).type !== "checkbox") return null;
 	if (!target.classList.contains("task-list-item-checkbox")) return null;
 	const path = eventPath(evt);
-	if (!isInLivePreview(path) || !isInsideEmbed(path) || isNonCheckboxTarget(path)) return null;
+	if (!isRenderedTaskSurface(path) || isNonCheckboxTarget(path)) return null;
 	return target;
 }
 
@@ -120,8 +131,8 @@ function swallow(evt: Event): void {
 
 /** Wire the embed press handler. Returns a function that stops it. */
 export function wireEmbedPress(deps: EmbedPressDeps): () => void {
-	const { plugin, presser, settings } = deps;
-	const doc = deps.document ?? document;
+	const { plugin, presser, settings, workspace } = deps;
+	const mainDoc = deps.document ?? document;
 	const now = deps.now ?? (() => Date.now());
 
 	const controller = new PressController();
@@ -256,13 +267,34 @@ export function wireEmbedPress(deps: EmbedPressDeps): () => void {
 	};
 
 	const opts = { capture: true };
-	plugin.registerDomEvent(doc, "pointerdown", onPointerDown, opts);
-	plugin.registerDomEvent(doc, "pointermove", onPointerMove, opts);
-	plugin.registerDomEvent(doc, "pointerup", onPointerUp, opts);
-	plugin.registerDomEvent(doc, "pointercancel", onPointerCancel, opts);
-	plugin.registerDomEvent(doc, "contextmenu", onContextMenu, opts);
-	plugin.registerDomEvent(doc, "click", onClick, opts);
-	plugin.registerDomEvent(doc, "keydown", onKeyDown, opts);
+	/** Documents that already carry the listeners: one set per document, never two. */
+	const wired = new Set<Document>();
+	const attach = (doc: Document): void => {
+		if (wired.has(doc)) return;
+		wired.add(doc);
+		plugin.registerDomEvent(doc, "pointerdown", onPointerDown, opts);
+		plugin.registerDomEvent(doc, "pointermove", onPointerMove, opts);
+		plugin.registerDomEvent(doc, "pointerup", onPointerUp, opts);
+		plugin.registerDomEvent(doc, "pointercancel", onPointerCancel, opts);
+		plugin.registerDomEvent(doc, "contextmenu", onContextMenu, opts);
+		plugin.registerDomEvent(doc, "click", onClick, opts);
+		plugin.registerDomEvent(doc, "keydown", onKeyDown, opts);
+	};
+	attach(mainDoc);
+
+	// A popout window is its own document (E16): a Reading view there is handled
+	// exactly as in the main window, by one listener set on that document.
+	if (workspace) {
+		for (const leaf of workspace.getLeavesOfType("markdown")) {
+			const owner = (leaf.view as { contentEl?: { ownerDocument?: Document } }).contentEl?.ownerDocument;
+			if (owner) attach(owner);
+		}
+		plugin.registerEvent(
+			workspace.on("window-open", (_win, popout: Window) => {
+				if (popout?.document) attach(popout.document);
+			})
+		);
+	}
 
 	return () => {
 		controller.settingOff();

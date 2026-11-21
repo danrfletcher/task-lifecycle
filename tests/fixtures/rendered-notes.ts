@@ -133,3 +133,18 @@ export const TABS_CACHE = {
 		{ position: pos(2), parent: 1 },
 	],
 };
+
+/**
+ * The metadata cache Obsidian builds for `tests/fixtures/reading-course.md`
+ * (and its CRLF twin, which has the same lines): lines are 0-based.
+ */
+export const READING_COURSE_CACHE = {
+	headings: [{ heading: "Course", level: 1, position: pos(0) }],
+	blocks: { l2: { position: pos(2) }, solo: { position: pos(6) } },
+	listItems: [
+		{ position: pos(2), parent: -2 },
+		{ position: pos(3), parent: 2 },
+		{ position: pos(4), parent: 2 },
+		{ position: pos(6), parent: -6 },
+	],
+};

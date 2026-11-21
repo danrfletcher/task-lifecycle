@@ -1114,13 +1114,30 @@ describe("edge cases", () => {
 		expect(v.editor.replaceCalls).toBe(0);
 	});
 
-	it("F3: Reading view behaves exactly as native", async () => {
+	it("Reading view is not this handler's: the editor path stays inert, the rendered-task path writes the note and Obsidian's toggle does not run", async () => {
 		rig = await setup([["- [ ] a"]], { mode: "reading" });
 		const v = rig.views[0];
+		// Reading view draws only the task's text next to the box.
+		const drawn = "a";
+		v.text(0).textContent = drawn;
+		const file = rig.app.addNote("note-0.md", "- [ ] a\n", {
+			listItems: [{ position: { start: { line: 0 }, end: { line: 0 } }, parent: -1 }],
+		});
+		const leaf = (rig.app.workspace.leaves as Array<{ view: Record<string, unknown> }>)[0];
+		leaf.view.file = file;
+		leaf.view.getMode = () => "preview";
+		let native = 0;
+		v.checkbox(0).addEventListener("click", () => (native += 1));
+
 		const { down, up, clk } = physicalClick(v.checkbox(0), at(0, 3));
-		pointer("pointerdown", v.checkbox(0), at(0, 3));
-		vi.advanceTimersByTime(1000);
-		expect(down.defaultPrevented || up.defaultPrevented || clk.defaultPrevented).toBe(false);
+		await vi.advanceTimersByTimeAsync(1000);
+		// The click is swallowed (so Obsidian's bare toggle never runs) and the plugin writes the status.
+		expect(clk.defaultPrevented).toBe(true);
+		expect(native).toBe(0);
+		expect(down.defaultPrevented || up.defaultPrevented).toBe(false);
+		expect(rig.app.vault.texts.get("note-0.md")).toBe("- [/] a\n");
+		expect(rig.app.vault.writes).toEqual(["process:note-0.md"]);
+		// Nothing went through the editor press path: no editor write, no hold timer left behind.
 		expect(v.editor.replaceCalls).toBe(0);
 		expect(vi.getTimerCount()).toBe(0);
 	});

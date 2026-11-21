@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import { checkboxTokenRange } from "../../src/domain/line-classifier";
 import {
 	NON_CHECKBOX_CLASSES,
+	REJECTED_LEAF_TYPES,
+	REJECTED_SURFACE_CLASSES,
 	isCheckboxPress,
 	isInLivePreview,
+	isInReadingView,
 	isNonCheckboxTarget,
 	isPosOnCheckboxToken,
+	isRenderedTaskSurface,
 	pathHitsWidget,
 	type PathElement,
 } from "../../src/status-cycle/checkbox-hit-test";
@@ -14,6 +18,12 @@ import {
 const el = (tagName: string, ...classes: string[]): PathElement => ({
 	tagName,
 	classList: { contains: (c: string) => classes.includes(c) },
+});
+
+/** A pane's `.workspace-leaf-content` with its `data-type`. */
+const leafContent = (type: string): PathElement => ({
+	...el("DIV", "workspace-leaf-content"),
+	getAttribute: (name: string) => (name === "data-type" ? type : null),
 });
 
 describe("checkboxTokenRange", () => {
@@ -208,7 +218,7 @@ describe("isCheckboxPress", () => {
 		expect(isCheckboxPress([text, lp], "- [ ] a", 6)).toBe(false);
 	});
 
-	it("Source mode and Reading view are not presses", () => {
+	it("Source mode and Reading view are not editor-line presses (Reading view is isRenderedTaskSurface's)", () => {
 		const source = el("DIV", "markdown-source-view");
 		const reading = el("DIV", "markdown-reading-view");
 		expect(isCheckboxPress([widget, source], "- [ ] a", 2)).toBe(false);
@@ -225,4 +235,87 @@ describe("isCheckboxPress", () => {
 			expect(isCheckboxPress([label, lp], line, line.indexOf("[") + 1)).toBe(true);
 		}
 	);
+});
+
+describe("isRenderedTaskSurface: the gate for a checkbox Obsidian draws outside the live editor (E16, F4)", () => {
+	const box = el("INPUT", "task-list-item-checkbox");
+	const embed = el("DIV", "internal-embed", "markdown-embed");
+	const lp = el("DIV", "markdown-source-view", "is-live-preview");
+	const source = el("DIV", "markdown-source-view");
+	const reading = el("DIV", "markdown-reading-view");
+	const preview = el("DIV", "markdown-preview-view");
+
+	// [surface, path from the checkbox outwards, handled]
+	const surfaces: Array<[string, PathElement[], boolean]> = [
+		["Reading view, the note's own checkbox", [box, preview, reading], true],
+		["Reading view, a checkbox in an embed", [box, embed, preview, reading], true],
+		["Reading view in a popout window (same classes, other document)", [box, preview, reading, el("DIV", "mod-popout")], true],
+		["Reading view in a split pane", [box, preview, reading, el("DIV", "workspace-split")], true],
+		["Live Preview, a checkbox in an embed", [box, embed, lp], true],
+		["Live Preview, the editor's own checkbox widget", [box, el("DIV", "cm-line"), lp], false],
+		["Source mode", [box, el("DIV", "cm-line"), source], false],
+		["Source mode, an embed-looking element", [box, embed, source], false],
+		["a canvas card", [box, embed, el("DIV", "canvas-node")], false],
+		["a canvas card showing a note in Reading view", [box, preview, reading, el("DIV", "canvas-node")], false],
+		["a canvas pane", [box, embed, leafContent("canvas")], false],
+		["a hover popover over a link", [box, embed, el("DIV", "popover", "hover-popover")], false],
+		["a hover popover with a Reading view in it", [box, preview, reading, el("DIV", "hover-popover")], false],
+		["a search result", [box, el("DIV", "search-result")], false],
+		["the search pane", [box, preview, reading, leafContent("search")], false],
+		["the backlinks pane", [box, el("DIV", "backlink-pane")], false],
+		["the backlinks pane, as a leaf", [box, embed, leafContent("backlink")], false],
+		["the outgoing links pane", [box, embed, leafContent("outgoing-link")], false],
+		["backlinks drawn under a Reading view", [box, el("DIV", "embedded-backlinks"), reading], false],
+		["a Dataview block in a Reading view", [box, el("DIV", "block-language-dataview"), reading], false],
+		["a Tasks query block in a Reading view", [box, el("DIV", "block-language-tasks"), reading], false],
+		["a Tasks query result in a Reading view", [box, el("DIV", "plugin-tasks-query-result"), reading], false],
+		["a Dataview block in an embed in Live Preview", [box, el("DIV", "block-language-dataview"), embed, lp], false],
+		["a pane of another type that holds a Reading view", [box, preview, reading, leafContent("markdown")], true],
+		["no known container", [box, el("DIV")], false],
+		["an empty path", [], false],
+	];
+
+	it.each(surfaces)("%s -> %s", (_name, path, handled) => {
+		expect(isRenderedTaskSurface(path)).toBe(handled);
+	});
+
+	it("Reading view flips from \"no\" (the editor gate) to \"yes\" (the rendered gate); the rest do not", () => {
+		const path = [box, preview, reading];
+		expect(isInLivePreview(path)).toBe(false);
+		expect(isInReadingView(path)).toBe(true);
+		expect(isRenderedTaskSurface(path)).toBe(true);
+		for (const [, other, handled] of surfaces.filter(([n]) => !/^Reading view|^Live Preview, a checkbox|pane of another type/.test(n))) {
+			expect(isRenderedTaskSurface(other)).toBe(handled);
+			expect(handled).toBe(false);
+		}
+	});
+
+	it("F4: the rejected container classes and leaf types are exactly these", () => {
+		expect([...REJECTED_SURFACE_CLASSES]).toEqual([
+			"canvas-node",
+			"popover",
+			"hover-popover",
+			"search-result",
+			"search-results-container",
+			"backlink-pane",
+			"embedded-backlinks",
+			"block-language-dataview",
+			"block-language-tasks",
+			"plugin-tasks-query-result",
+		]);
+		expect([...REJECTED_LEAF_TYPES]).toEqual(["search", "backlink", "outgoing-link", "canvas"]);
+	});
+
+	it.each(REJECTED_SURFACE_CLASSES)("%s rejects a Reading view and an embed in Live Preview", (cls) => {
+		expect(isRenderedTaskSurface([box, el("DIV", cls), reading])).toBe(false);
+		expect(isRenderedTaskSurface([box, embed, lp, el("DIV", cls)])).toBe(false);
+	});
+
+	it.each(REJECTED_LEAF_TYPES)("a %s pane rejects a Reading view", (type) => {
+		expect(isRenderedTaskSurface([box, reading, leafContent(type)])).toBe(false);
+	});
+
+	it("the editor gate still answers no for Reading view (it needs an editor line)", () => {
+		expect(isCheckboxPress([box, reading], "- [ ] a", 2)).toBe(false);
+	});
 });

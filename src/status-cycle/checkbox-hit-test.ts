@@ -17,6 +17,7 @@ export interface PathElement {
 	tagName?: string;
 	classList?: { contains(name: string): boolean };
 	type?: string;
+	getAttribute?(name: string): string | null;
 }
 
 /** Classes whose presence anywhere in the event path means "not ours". */
@@ -65,6 +66,65 @@ export function isInsideEmbed(path: readonly PathElement[]): boolean {
 	return path.some((el) => hasClass(el, "internal-embed") || hasClass(el, "markdown-embed"));
 }
 
+/** True if the path is inside a note's Reading view (`.markdown-reading-view`), in any window. */
+export function isInReadingView(path: readonly PathElement[]): boolean {
+	return path.some((el) => hasClass(el, "markdown-reading-view"));
+}
+
+/**
+ * Containers that draw task checkboxes this plugin never handles (F4): a
+ * canvas card, a hover preview, search results, the backlinks pane (also the
+ * one drawn under a note), and Dataview / Tasks query renderings. Such a
+ * container in the path rejects the press even when a Reading view or an
+ * embed is also in it. `src/rendered/resolve-rendered-task.ts` keeps the same
+ * list as a selector for the check made when the checkbox is resolved.
+ */
+export const REJECTED_SURFACE_CLASSES: readonly string[] = Object.freeze([
+	"canvas-node",
+	"popover",
+	"hover-popover",
+	"search-result",
+	"search-results-container",
+	"backlink-pane",
+	"embedded-backlinks",
+	"block-language-dataview",
+	"block-language-tasks",
+	"plugin-tasks-query-result",
+]);
+
+/** `data-type` of a `.workspace-leaf-content` whose panes are never handled (F4). */
+export const REJECTED_LEAF_TYPES: readonly string[] = Object.freeze([
+	"search",
+	"backlink",
+	"outgoing-link",
+	"canvas",
+]);
+
+/** True if the path holds a container from `REJECTED_SURFACE_CLASSES` or a leaf of a `REJECTED_LEAF_TYPES` pane. */
+export function isInRejectedSurface(path: readonly PathElement[]): boolean {
+	return path.some((el) => {
+		if (REJECTED_SURFACE_CLASSES.some((name) => hasClass(el, name))) return true;
+		if (!hasClass(el, "workspace-leaf-content")) return false;
+		const type = el.getAttribute?.("data-type");
+		return type !== null && type !== undefined && REJECTED_LEAF_TYPES.includes(type);
+	});
+}
+
+/**
+ * The rendered-task gate: is the path on a surface where a checkbox Obsidian
+ * draws outside the live editor is handled by the rendered-task path
+ * (`wire-embed-press.ts`)? Accepted surfaces, and only these:
+ *  - a note's Reading view (`.markdown-reading-view`), including an embed in
+ *    it, in the main window, a split or a popout;
+ *  - an embed (`.internal-embed` / `.markdown-embed`) in a Live Preview editor.
+ * A Live Preview checkbox that is not in an embed is the editor path's, Source
+ * mode draws no checkbox, and nothing in `REJECTED_SURFACE_CLASSES` counts.
+ */
+export function isRenderedTaskSurface(path: readonly PathElement[]): boolean {
+	if (isInRejectedSurface(path)) return false;
+	return isInReadingView(path) || (isInLivePreview(path) && isInsideEmbed(path));
+}
+
 export interface WidgetHit {
 	/** The path holds the Live Preview `input.task-list-item-checkbox` widget. */
 	hitsCheckbox: boolean;
@@ -88,7 +148,9 @@ export function pathHitsWidget(path: readonly PathElement[]): WidgetHit {
 /**
  * Decide whether a pointer or click event is a press on a checkbox.
  *
- *  - Source mode, Reading view and anything outside the editor: no.
+ *  - Source mode and anything outside a Live Preview editor: no. (Reading
+ *    view has no editor line to place a press on; `isRenderedTaskSurface`
+ *    is its gate.)
  *  - A chevron, bullet, fold placeholder or `LI` padding in the path: no.
  *  - The checkbox widget itself: yes, whatever position the editor reports
  *    for the click (the widget stands in for the "[ ]" text).

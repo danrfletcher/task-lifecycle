@@ -309,14 +309,8 @@ describe("G4: only the checkbox is intercepted", () => {
 		expect(rig.app.vault.writes).toEqual([]);
 	});
 
-	it("an embed in a Reading view, a hover popover or a canvas card is left native", async () => {
+	it("an embed in a hover popover or a canvas card is left native (F4); Reading view has its own tests in reading-view-press.dom.test.ts", async () => {
 		rig = await makeRig();
-		// Reading view of the host: no `is-live-preview` (Reading view is a later change).
-		rig.host.classList.remove("is-live-preview");
-		const reading = rig.addEmbed("Course#^l2", [lessonSection()]);
-		expect(mouseClick(reading.boxes[0]).defaultPrevented).toBe(false);
-
-		rig.host.classList.add("is-live-preview");
 		for (const cls of ["popover hover-popover", "canvas-node"]) {
 			const wrap = document.createElement("div");
 			wrap.className = cls;

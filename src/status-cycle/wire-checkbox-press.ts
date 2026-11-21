@@ -17,7 +17,9 @@
  * only turns DOM events into controller inputs, keeps real time, and does
  * what the outputs say.
  *
- * Fence: no import from the cascade, no Reading-mode handling, no commands.
+ * Fence: no import from the cascade, no commands. This handler is the Live
+ * Preview editor's own checkbox only; a checkbox that Obsidian draws outside
+ * the editor (Reading view, an embed) belongs to `wire-embed-press.ts`.
  */
 import type { App, Editor, Plugin } from "obsidian";
 

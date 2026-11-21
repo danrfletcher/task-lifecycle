@@ -4,7 +4,7 @@ An Obsidian plugin for the life of a Markdown task line. Private repo; not on th
 
 ## What it does
 
-- **Status cycle.** Clicking a task checkbox in Live Preview steps through ` ` → `/` → `x` → `-` → ` ` (open, in progress, done, cancelled) instead of toggling done/undone. Holding a checkbox for half a second cancels the task (`[-]`).
+- **Status cycle.** Clicking a task checkbox in Live Preview, in an embed, or in a note's Reading view steps through ` ` → `/` → `x` → `-` → ` ` (open, in progress, done, cancelled) instead of toggling done/undone. Holding a checkbox for half a second cancels the task (`[-]`).
 - **Close stamps.** Closing a task adds `✅ YYYY-MM-DD` (done) or `❌ YYYY-MM-DD` (cancelled), placed at the end of the line and before a trailing `^blockid`. Reopening removes the stamp.
 - **Close cascade.** Closing a parent task asks whether to close its open subtasks too ("Close subtasks" / "Leave open").
 
@@ -14,7 +14,7 @@ Only the checkbox character, the stamps and the single space before a stamp are 
 
 Settings → Task Lifecycle has four toggles, all on by default:
 
-- **Status cycle**. Off, a click on a checkbox in an embed is the plain toggle (open to done, anything else to open), written by the plugin so the stamp and cascade still follow; a hold still cancels.
+- **Status cycle**. Off, a click on a checkbox in an embed or in Reading view is the plain toggle (open to done, anything else to open), written by the plugin so the stamp and cascade still follow; a hold still cancels.
 - **Close stamps**
 - **Close cascade**
 - **Checkbox icons**
