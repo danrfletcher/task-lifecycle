@@ -666,6 +666,26 @@ describe("G7 (hold only): Status cycle off", () => {
 		expect(rig.app.vault.writes).toHaveLength(1);
 	});
 
+	it("a hold's write that redraws the embed: the click lands on a new box and is still swallowed, nothing is written twice", async () => {
+		rig = await makeRig({ statusCycle: false });
+		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
+		down(boxes[0], "touch");
+		await wait(500);
+		expect(rig.courseText()).toBe(LESSON_CANCELLED);
+		// Obsidian redraws the embed from the write before the finger lifts: the
+		// pressed input is gone and an equal one has taken its place.
+		const fresh = boxes[0].cloneNode(true) as HTMLInputElement;
+		boxes[0].replaceWith(fresh);
+		const native = watchNative(fresh);
+		up(fresh, "touch");
+		const after = click(fresh, 1);
+		await settle();
+		expect(after.defaultPrevented).toBe(true);
+		expect(native.count()).toBe(0);
+		expect(rig.courseText()).toBe(LESSON_CANCELLED);
+		expect(rig.app.vault.writes).toHaveLength(1);
+	});
+
 	it("a tap is the plain toggle (the settings matrix is in rendered-settings.dom.test.ts)", async () => {
 		rig = await makeRig({ statusCycle: false });
 		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);

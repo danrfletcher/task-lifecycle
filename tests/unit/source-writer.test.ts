@@ -226,6 +226,53 @@ describe("E4 unsaved typing / E15 self-embed", () => {
 		// The fake editor jumped to 0 during the transaction; the writer restored it.
 		expect(scroller.scrollTop).toBe(340);
 	});
+
+	describe("E15: the cursor does not jump (real CodeMirror state)", () => {
+		const DOC = "![[Self#^l2]]\n- [/] Lesson 2 content ^l2\n\t- [ ] Watch video";
+		const STAMPED = "- [x] Lesson 2 content ✅ 2026-11-20 ^l2";
+		const press = async () => {
+			const cm = makeCmEditor(DOC, { today: TODAY });
+			return { cm, writer: writerFor(fakeVault({}), workspace([{ path: "Self.md", editor: cm.editor }])).writer };
+		};
+
+		it("a caret on another line stays where it was", async () => {
+			const { cm, writer } = await press();
+			cm.select({ line: 2, ch: 9 });
+
+			expect((await writer.press(file("Self.md"), 1, "click")).status).toBe("written");
+
+			expect(cm.doc().split("\n")[1]).toBe(STAMPED);
+			expect(cm.selection()).toEqual({ anchor: { line: 2, ch: 9 }, head: { line: 2, ch: 9 } });
+		});
+
+		it("a caret in the task's text before the stamp stays on the same character", async () => {
+			const { cm, writer } = await press();
+			cm.select({ line: 1, ch: 11 }); // between "Lesson" and " 2"
+
+			await writer.press(file("Self.md"), 1, "click");
+
+			expect(cm.selection().head).toEqual({ line: 1, ch: 11 });
+			expect(cm.doc().split("\n")[1].slice(0, 11)).toBe("- [x] Lesso");
+		});
+
+		it("a caret at the end of the task line follows its text past the stamp", async () => {
+			const { cm, writer } = await press();
+			cm.select({ line: 1, ch: "- [/] Lesson 2 content ^l2".length });
+
+			await writer.press(file("Self.md"), 1, "click");
+
+			expect(cm.selection().head).toEqual({ line: 1, ch: STAMPED.length });
+		});
+
+		it("a selection across the task line keeps both ends on their own text", async () => {
+			const { cm, writer } = await press();
+			cm.select({ line: 0, ch: 2 }, { line: 2, ch: 4 });
+
+			await writer.press(file("Self.md"), 1, "click");
+
+			expect(cm.selection()).toEqual({ anchor: { line: 0, ch: 2 }, head: { line: 2, ch: 4 } });
+		});
+	});
 });
 
 describe("E4 two panes on one note: write through the pane being edited", () => {
@@ -395,6 +442,19 @@ describe("G8 a line that is not a task at write time", () => {
 		expect(editor.text()).toBe(text);
 	});
 
+	it("a vault.process that resolves without running the edit rejects the press, and the queue goes on", async () => {
+		const vault = fakeVault({ "N.md": "- [ ] a" });
+		vault.process.mockImplementationOnce(async () => "- [ ] a"); // resolves, never calls fn
+		const { writer } = writerFor(vault, workspace([]));
+
+		const first = writer.press(file("N.md"), 0, "click");
+		const second = writer.press(file("N.md"), 0, "click");
+
+		await expect(first).rejects.toThrow("vault.process did not run the edit");
+		expect(await second).toMatchObject({ status: "written", route: "vault", from: " ", to: "/" });
+		expect(vault.texts.get("N.md")).toBe("- [/] a");
+	});
+
 	it("a long press on [-] is skipped as no-change on both routes", async () => {
 		const vault = fakeVault({ "N.md": "- [-] a ❌ 2026-11-08" });
 		const { writer } = writerFor(vault, workspace([]));
@@ -427,8 +487,18 @@ describe("E1 stamp placement (closed route)", () => {
 });
 
 describe("E5 CRLF (closed route)", () => {
-	it("the CRLF fixture keeps every \\r\\n, the line count and the final line's ending", async () => {
-		for (const text of [fixtureFile("crlf-note.md"), `${fixtureFile("crlf-note.md")}\r\n`]) {
+	const crlf = fixtureFile("crlf-note.md");
+	const variants: Array<[string, string, boolean]> = [
+		["the fixture as it is (one final \\r\\n)", crlf, true],
+		["an extra blank line at the end (two final \\r\\n)", `${crlf}\r\n`, true],
+		["no final newline", crlf.replace(/\r\n$/, ""), false],
+	];
+
+	it.each(variants)(
+		"%s: keeps every \\r\\n, the line count and the final line's ending",
+		async (_name, text, endsWithCrlf) => {
+			// Guard the fixture itself: the no-final-newline variant must really lack one.
+			expect(text.endsWith("\r\n")).toBe(endsWithCrlf);
 			const vault = fakeVault({ "N.md": text });
 			const { writer } = writerFor(vault, workspace([]));
 			const target = text.split("\r\n").findIndex((l) => l === "- [ ] Ship release ^rel1");
@@ -439,11 +509,11 @@ describe("E5 CRLF (closed route)", () => {
 			const out = vault.texts.get("N.md")!;
 			expect(out).toBe(text.replace("- [ ] Ship release ^rel1", "- [x] Ship release ✅ 2026-11-20 ^rel1"));
 			expect(out.split("\r\n")).toHaveLength(text.split("\r\n").length);
-			expect(out.endsWith("\r\n")).toBe(text.endsWith("\r\n"));
+			expect(out.endsWith("\r\n")).toBe(endsWithCrlf);
 			expect(out.replace(/\r\n/g, "")).not.toContain("\n");
 			expect(out).toContain("^rel1\r\n"); // the stamped line keeps its \r after ^id
 		}
-	});
+	);
 
 	it("a mixed-ending note keeps each line's own ending", async () => {
 		const text = "- [ ] a\r\n- [ ] b\n- [/] c ^c1\r\n- [ ] d";

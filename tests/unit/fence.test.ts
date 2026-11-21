@@ -173,7 +173,7 @@ describe("embed press (src/status-cycle/wire-embed-press.ts, src/rendered/embed-
 	it("F9: the click is taken in the capture phase through registerDomEvent and always swallowed once handled", () => {
 		const src = read(wirePath);
 		expect(src).toMatch(/registerDomEvent\(doc, "click", onClick, opts\)/);
-		expect(src).toMatch(/const opts = \{ capture: true \}/);
+		expect(src).toMatch(/const opts = \{ capture: true, signal: gate\.signal \}/);
 		// The native toggle is stopped before the press kind is decided, so no kind can let it through.
 		const handler = src.slice(src.indexOf("const onClick"), src.indexOf("const onKeyDown"));
 		const begin = handler.indexOf("presser.begin(box)");

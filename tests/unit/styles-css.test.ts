@@ -220,6 +220,32 @@ describe("styles.css: rendered boxes (embed and Reading view)", () => {
 		}
 	});
 
+	it("a cancelled rendered item is dimmed by colour, not opacity, and its nested lists are cut off from strike and colour", () => {
+		const item = `${SCOPE} .task-list-item.is-checked[data-task="-"]`;
+		const own = rules.find((r) => r.selectors.includes(item));
+		expect(own?.body).toMatch(/text-decoration:\s*line-through\s*!important/);
+		expect(own?.body).toMatch(/color:\s*var\(--lines,\s*var\(--text-faint\)\)/);
+		// Opacity multiplies into every descendant and cannot be undone by a child.
+		expect(own?.body).not.toMatch(/opacity/);
+
+		const nested = rules.find((r) => r.selectors.includes(`${item} > ul`));
+		expect(nested?.selectors).toEqual([`${item} > ul`, `${item} > ol`]);
+		// An inline-block is not struck through by its parent's line-through.
+		expect(nested?.body).toMatch(/display:\s*inline-block/);
+		expect(nested?.body).toMatch(/width:\s*100%/);
+		expect(nested?.body).toMatch(/box-sizing:\s*border-box/);
+		expect(nested?.body).toMatch(/color:\s*var\(--text-normal\)/);
+		expect(nested?.body).not.toMatch(/opacity|line-through/);
+		// It comes after the item's own rule, so its colour wins.
+		expect(rules.indexOf(nested!)).toBeGreaterThan(rules.indexOf(own!));
+	});
+
+	it("the editor's cancelled line keeps the opacity dim (one line per task, no subtree)", () => {
+		const line = rules.find((r) => r.selectors.includes(`${SCOPE} .HyperMD-task-line[data-task="-"]`));
+		expect(line?.body).toMatch(/opacity:\s*0\.8/);
+		expect(line?.body).toMatch(/line-through/);
+	});
+
 	it("subtasks of a done item are not made bold by it, and a done subtask is bold again", () => {
 		const parent = `${SCOPE} .task-list-item.is-checked[data-task="x"]`;
 		const reset = rules.find((r) => r.selectors.includes(`${parent} .task-list-item`));

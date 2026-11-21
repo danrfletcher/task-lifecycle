@@ -1,6 +1,6 @@
 # Probe: how Obsidian renders and ticks tasks outside the live editor
 
-Run on 2026-11-20 with the real `obsidian` CLI (`eval`, `plugin:enable`, `plugin:disable`) against Obsidian 1.15.1 (installer 1.14.4) on macOS. The CLI drove a throwaway Obsidian instance with its own home folder and user-data directory, so Dan's own vault and window were never touched. The vault held `Course.md` (the golden path below) plus a few extra notes for the other embed forms. Plugin code under test is this branch's 0.1.0 build.
+Run on 2026-11-20 with the real `obsidian` CLI (`eval`, `plugin:enable`, `plugin:disable`) against Obsidian 1.15.1 (installer 1.14.4) on macOS. The CLI drove a throwaway Obsidian instance with its own home folder and user-data directory, so Dan's own vault and window were never touched. The vault held `Course.md` (the golden path below) plus a few extra notes for the other embed forms. Plugin code under test is this branch's 0.1.0 build. The scripts are in `scripts/probe/` (see its README), so the findings can be re-run when Obsidian updates.
 
 ```
 - [ ] Lesson 2 content ^l2

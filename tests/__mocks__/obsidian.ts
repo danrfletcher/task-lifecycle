@@ -355,10 +355,16 @@ export class Plugin {
 	): void {
 		el.addEventListener(type, callback, options);
 		this.domListenerCount += 1;
-		this.cleanups.push(() => {
+		let live = true;
+		const drop = (): void => {
+			if (!live) return;
+			live = false;
 			el.removeEventListener(type, callback, options);
 			this.domListenerCount -= 1;
-		});
+		};
+		// A `signal` in the options removes the listener when it aborts, as in a browser.
+		if (typeof options === "object" && options.signal) options.signal.addEventListener("abort", drop, { once: true });
+		this.cleanups.push(drop);
 	}
 	registerEvent(ref: unknown): void {
 		const ws = (this.app as App).workspace;

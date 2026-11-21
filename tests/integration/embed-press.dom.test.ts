@@ -96,7 +96,29 @@ describe("G1 + G5 + GP1 to GP5: the cycle on a closed source", () => {
 		expect(rig.courseText()).toBe(`- [x] Lesson ✅ content ✅ ${TODAY} ^l2\n`);
 	});
 
-	it("a same-kind stamp is not refreshed and an old stamp is removed on reopen", async () => {
+	it("a press that stays in one status kind keeps an existing stamp as it is", async () => {
+		rig = await makeRig();
+		// An unknown char counts as open and a press sends it to a space (open again):
+		// the stray old stamp is neither refreshed to today nor removed.
+		rig.app.vault.texts.set("Course.md", "- [?] Lesson 2 content ✅ 2026-11-01 ^l2\n");
+		const { boxes } = rig.addEmbed("Course#^l2", [[task("Lesson 2 content ", 0)]]);
+		boxes[0].closest("li")!.setAttribute("data-task", "?");
+		mouseClick(boxes[0]);
+		await settle();
+		expect(rig.courseText()).toBe("- [ ] Lesson 2 content ✅ 2026-11-01 ^l2\n");
+	});
+
+	it("a stray old stamp of the other kind is swapped for today's when the press closes the task", async () => {
+		rig = await makeRig();
+		rig.app.vault.texts.set("Course.md", "- [/] Lesson 2 content ❌ 2026-11-01 ^l2\n");
+		const { boxes } = rig.addEmbed("Course#^l2", [[task("Lesson 2 content ", 0)]]);
+		boxes[0].closest("li")!.setAttribute("data-task", "/");
+		mouseClick(boxes[0]);
+		await settle();
+		expect(rig.courseText()).toBe(`- [x] Lesson 2 content ✅ ${TODAY} ^l2\n`);
+	});
+
+	it("a different-kind stamp is swapped when a done task is cancelled, and removed on reopen", async () => {
 		rig = await makeRig();
 		rig.app.vault.texts.set("Course.md", "- [x] Lesson 2 content ✅ 2026-11-01 ^l2\n");
 		const { boxes } = rig.addEmbed("Course#^l2", [[task("Lesson 2 content ", 0)]]);
@@ -559,6 +581,41 @@ describe("E3: two embeds of the same block", () => {
 		await settle();
 		expect(rig.courseText()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
 		expect(Notice.shown).toEqual([]);
+	});
+
+	it("an embed of the same task written differently (a .md path, the whole note) is redrawn too; a different task is not", async () => {
+		rig = await makeRig();
+		const a = rig.addEmbed("Course#^l2", [lessonSection()]);
+		const withExtension = rig.addEmbed("Course.md#^l2", [lessonSection()]);
+		const wholeNote = rig.addEmbed("Course", [lessonSection()]);
+		const status = (box: HTMLInputElement) => box.closest("li")?.getAttribute("data-task");
+
+		mouseClick(a.boxes[0]);
+		await settle();
+
+		expect(rig.app.vault.writes).toHaveLength(1);
+		expect(rig.courseText()).toBe(course("- [/] Lesson 2 content ^l2"));
+		expect(status(a.boxes[0])).toBe("/");
+		expect(status(withExtension.boxes[0])).toBe("/");
+		expect(status(wholeNote.boxes[0])).toBe("/");
+		expect(withExtension.boxes[0].closest("li")?.classList.contains("is-checked")).toBe(true);
+		// The subtasks are other tasks: they keep the status they were drawn with.
+		expect(status(withExtension.boxes[1])).toBe(" ");
+		expect(status(wholeNote.boxes[2])).toBe(" ");
+		expect(Notice.shown).toEqual([]);
+	});
+
+	it("an embed of another note whose task has the same text is not redrawn", async () => {
+		rig = await makeRig();
+		const lesson = rig.addEmbed("Course#^l2", [lessonSection()]);
+		// Forms has no such task; a box drawn there with the same text is not Course's.
+		const other = rig.addEmbed("Forms#Sub", [[task("Lesson 2 content ", 0)]]);
+
+		mouseClick(lesson.boxes[0]);
+		await settle();
+
+		expect(lesson.boxes[0].closest("li")?.getAttribute("data-task")).toBe("/");
+		expect(other.boxes[0].closest("li")?.getAttribute("data-task")).toBe(" ");
 	});
 });
 

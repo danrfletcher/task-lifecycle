@@ -22,7 +22,9 @@
  * Writes are serialised per file: a press that arrives while an earlier one
  * on the same file is still running waits for it, then reads the text as it
  * is by then. A write that throws rejects its own `press` promise and does
- * not hold up the next one. A press on another file is never held back.
+ * not hold up the next one. A press on another file is never held back. A
+ * `vault.process` that resolves without running the edit counts as a write
+ * that threw: the `press` promise rejects, it is never reported as skipped.
  *
  * A line that is no longer a task at write time (moved, edited, in a fenced
  * block or frontmatter, past the last line) is skipped: nothing is written
@@ -201,8 +203,10 @@ export function createSourceWriter(deps: SourceWriterDeps): SourceWriter {
 		});
 		if (refused) return refused;
 		const result = outcome as LineEditResult | null;
-		if (result && "edit" in result) return written("vault", result.edit);
-		return result ? skipped(result) : { status: "skipped", reason: "not-a-task" };
+		// `vault.process` resolved but never ran our callback: nothing was
+		// decided about the line, so it is a failed write, not a skipped line.
+		if (!result) throw new Error("vault.process did not run the edit");
+		return "edit" in result ? written("vault", result.edit) : skipped(result);
 	};
 
 	const run = async (

@@ -14,7 +14,9 @@
  *    query plugin may draw them differently, so neither side keeps them);
  *  - for the source only, markdown syntax: wikilinks and aliases, markdown
  *    links, images, bold, italics, strikethrough, highlight, inline code,
- *    HTML tags and backslash escapes.
+ *    HTML tags, backslash escapes, footnote references and inline math.
+ *    Footnote numbers and typeset math cannot be rebuilt from the line, so
+ *    the rendered side leaves them out too (see `renderedTextOf`).
  * Whitespace runs collapse to one space and the ends are trimmed.
  */
 import { checkboxTokenRange, classifyLines } from "./line-classifier";
@@ -76,23 +78,57 @@ function wikilinkText(target: string, alias: string | undefined): string {
 	return target.replace(/^#/, "").replace(/#/g, " > ");
 }
 
-/** Markdown syntax removed from a source line, in the order Obsidian reads it. */
+/** Brackets for a placeholder: private-use characters no markdown rule reads. */
+const HOLD_OPEN = "\uE000";
+const HOLD_CLOSE = "\uE001";
+const HOLD_RE = /\uE000(\d+)\uE001/g;
+/** One left-to-right pass, so an escaped backtick never opens a code span. */
+const LITERAL_RE = /\\([\\`*_{}[\]()#+\-.!|~=<>^$])|`([^`]*)`/g;
+/**
+ * Math Obsidian draws as typeset output: `$$...$$`, or `$...$` whose opening
+ * `$` is followed by a non-space, whose closing `$` follows a non-space and is
+ * not followed by a digit (so "costs $5 and $6" is not math).
+ */
+const MATH_RE = /\$\$[^$]+\$\$|\$(?=[^\s$])(?:[^$\n]*?[^\s$])\$(?!\d)/g;
+/** `[^id]` and the inline form `^[text]`: Obsidian draws both as a superscript number. */
+const FOOTNOTE_RE = /\[\^[^\]\s]+\]|\^\[[^\]]*\]/g;
+
+/**
+ * Markdown syntax removed from a source line, in the order Obsidian reads it.
+ *
+ * Text Obsidian draws literally is held back first and put back last: the
+ * body of a code span (`**x**` is drawn as the four characters) and an
+ * escaped character (`\*a\*` is drawn `*a*`). Without that the emphasis
+ * rules would read their `*` and `_` as syntax.
+ */
 function stripMarkdown(text: string): string {
+	const held: string[] = [];
+	const hold = (literal: string): string => `${HOLD_OPEN}${held.push(literal) - 1}${HOLD_CLOSE}`;
+	const open = text
+		.replace(/[\uE000\uE001]/g, "")
+		.replace(LITERAL_RE, (_m, escaped: string | undefined, code: string | undefined) =>
+			hold(escaped ?? code ?? "")
+		);
+	return stripSyntax(open).replace(HOLD_RE, (_m, i: string) => held[Number(i)]);
+}
+
+/** The syntax rules, run on text whose literal parts are already held back. */
+function stripSyntax(text: string): string {
 	return text
+		.replace(MATH_RE, "")
+		.replace(FOOTNOTE_RE, "")
 		.replace(/!\[\[[^\]]*\]\]/g, "")
 		.replace(/!\[[^\]]*\]\([^)]*\)/g, "")
 		.replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_m, t: string, a: string | undefined) =>
 			wikilinkText(t, a)
 		)
 		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-		.replace(/`([^`]*)`/g, "$1")
 		.replace(/<\/?[A-Za-z][^>]*>/g, "")
 		.replace(/(\*\*|__)(.+?)\1/g, "$2")
 		.replace(/~~(.+?)~~/g, "$1")
 		.replace(/==(.+?)==/g, "$1")
 		.replace(/\*([^*]+)\*/g, "$1")
-		.replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, "$1$2")
-		.replace(/\\([\\`*_{}[\]()#+\-.!|~=<>^])/g, "$1");
+		.replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, "$1$2");
 }
 
 /**
