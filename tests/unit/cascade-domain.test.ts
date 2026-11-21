@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { joinLines, splitLines } from "../../src/domain/source-line-edit";
 import {
 	cascadeStatus,
 	collectDescendantIndices,
@@ -480,5 +481,100 @@ describe("lineSpan", () => {
 			const s = lineSpan(before, after)!;
 			expect(before.slice(0, s.fromCh) + s.text + before.slice(s.toCh)).toBe(after);
 		}
+	});
+});
+
+/**
+ * G6 / E10: the cascade gives the same edits whether the lines come from an
+ * editor (`getLine` for each line, which has no line ending) or from a split
+ * note file (what the closed-note write hands over). Each case also pins the
+ * rewritten note byte for byte, written out literally.
+ */
+describe("computeCascadeEdits: editor lines and split file lines agree (G6, E10)", () => {
+	/** What the open-editor route reads: one string per line, no line ending. */
+	const editorLines = (text: string): string[] => text.split(/\r\n|\n/);
+	/** What the closed-note route reads: the text of each split line. */
+	const fileLines = (text: string): string[] => splitLines(text).map((l) => l.text);
+	/** The closed-note rewrite: edits applied to the split lines, each line's own ending kept. */
+	function rewriteFile(text: string, parent: number, options = ON): string {
+		const parts = splitLines(text);
+		for (const e of computeCascadeEdits(fileLines(text), parent, options)) {
+			parts[e.line] = { text: e.after, eol: parts[e.line].eol };
+		}
+		return joinLines(parts);
+	}
+
+	const cases: Array<{ name: string; text: string; parent: number; options?: typeof ON; want: string }> = [
+		{
+			name: "done parent: subtasks get ✅ and x",
+			text: "- [x] p ✅ 2026-11-09\n\t- [ ] a\n\t- [/] b\n",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09\n\t- [x] a ✅ 2026-11-09\n\t- [x] b ✅ 2026-11-09\n",
+		},
+		{
+			name: "cancelled parent: subtasks get ❌ and -",
+			text: "- [-] p ❌ 2026-11-09\n\t- [ ] a\n\t- [/] b\n",
+			parent: 0,
+			want: "- [-] p ❌ 2026-11-09\n\t- [-] a ❌ 2026-11-09\n\t- [-] b ❌ 2026-11-09\n",
+		},
+		{
+			name: "stamps off: status only, no emoji",
+			text: "- [x] p\n\t- [ ] a ^a1\n",
+			parent: 0,
+			options: OFF,
+			want: "- [x] p\n\t- [x] a ^a1\n",
+		},
+		{
+			name: "depth: a grandchild under a closed child closes, a closed child keeps its own stamp",
+			text: "- [x] p ✅ 2026-11-09\n\t- [x] done ✅ 2026-11-01\n\t\t- [ ] deep\n\t\t\t- [/] deeper\n",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09\n\t- [x] done ✅ 2026-11-01\n\t\t- [x] deep ✅ 2026-11-09\n\t\t\t- [x] deeper ✅ 2026-11-09\n",
+		},
+		{
+			name: "non-task bullets between subtasks are walked through and left as they are",
+			text: "- [x] p ✅ 2026-11-09\n\t- note ^n1\n\t\t- [ ] under the note\n\t- [ ] after the note\n- [ ] sibling\n",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09\n\t- note ^n1\n\t\t- [x] under the note ✅ 2026-11-09\n\t- [x] after the note ✅ 2026-11-09\n- [ ] sibling\n",
+		},
+		{
+			name: "a fenced code block under the parent is untouched",
+			text: "- [x] p ✅ 2026-11-09\n\t```\n\t- [ ] in the fence\n\t```\n\t- [ ] real\n",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09\n\t```\n\t- [ ] in the fence\n\t```\n\t- [x] real ✅ 2026-11-09\n",
+		},
+		{
+			name: "^id on the parent stays; ^id on a subtask gets its stamp before it, an old stamp is replaced",
+			text: "- [x] p ✅ 2026-11-09 ^l2\n\t- [ ] a ^a1\n\t- [/] b ✅ 2026-10-01 ^b1\n",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09 ^l2\n\t- [x] a ✅ 2026-11-09 ^a1\n\t- [x] b ✅ 2026-11-09 ^b1\n",
+		},
+		{
+			name: "CRLF: every line keeps its \\r\\n",
+			text: "# T\r\n\r\n- [x] p ✅ 2026-11-09 ^l2\r\n\t- [ ] a\r\n\t- note\r\n\t- [ ] b ^b1\r\n- [ ] after\r\n",
+			parent: 2,
+			want: "# T\r\n\r\n- [x] p ✅ 2026-11-09 ^l2\r\n\t- [x] a ✅ 2026-11-09\r\n\t- note\r\n\t- [x] b ✅ 2026-11-09 ^b1\r\n- [ ] after\r\n",
+		},
+		{
+			name: "no final newline: the last line has no ending after the rewrite either",
+			text: "- [x] p ✅ 2026-11-09\n\t- [ ] a",
+			parent: 0,
+			want: "- [x] p ✅ 2026-11-09\n\t- [x] a ✅ 2026-11-09",
+		},
+	];
+
+	it.each(cases)("$name", ({ text, parent, options = ON, want }) => {
+		const fromEditor = computeCascadeEdits(editorLines(text), parent, options);
+		const fromFile = computeCascadeEdits(fileLines(text), parent, options);
+		expect(fromFile).toEqual(fromEditor);
+		expect(countOpenSubtasks(fileLines(text), parent)).toBe(countOpenSubtasks(editorLines(text), parent));
+		expect(rewriteFile(text, parent, options)).toBe(want);
+	});
+
+	it("a note with a lone \\r kept in the line text (the old split) gives the same rewrite as the split that drops it", () => {
+		const text = "- [x] p ✅ 2026-11-09\r\n\t- [ ] a\r\n";
+		const crKept = text.split("\n");
+		const rewritten = [...crKept];
+		for (const e of computeCascadeEdits(crKept, 0, ON)) rewritten[e.line] = e.after;
+		expect(rewritten.join("\n")).toBe(rewriteFile(text, 0));
 	});
 });

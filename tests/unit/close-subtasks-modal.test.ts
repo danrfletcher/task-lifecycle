@@ -109,6 +109,40 @@ describe("CloseSubtasksModal results", () => {
 		await expect(modal.result).resolves.toBe("close");
 	});
 
+	it("G6: a click outside the dialog (Obsidian closes the modal on its backdrop) resolves \"leave\"", async () => {
+		const modal = new CloseSubtasksModal(app, 3);
+		modal.open();
+		// The backdrop click is `modal.close()` in Obsidian; the dialog adds no handler of its own for it.
+		modal.close();
+		await expect(modal.result).resolves.toBe("leave");
+		expect(containers()).toHaveLength(0);
+	});
+
+	it("G6: the text is singular for 1 and plural for any other count, in the open dialog", () => {
+		for (const [count, text] of [
+			[1, "This task has 1 open subtask."],
+			[2, "This task has 2 open subtasks."],
+			[7, "This task has 7 open subtasks."],
+		] as const) {
+			const modal = new CloseSubtasksModal(app, count);
+			modal.open();
+			expect(document.querySelector(".modal-container p")?.textContent).toBe(text);
+			modal.close();
+		}
+	});
+
+	it("G6: Enter, then Escape, then a click: the result is \"close\" and settles exactly once", async () => {
+		const modal = new CloseSubtasksModal(app, 2);
+		const results: CascadeChoice[] = [];
+		void modal.result.then((c) => results.push(c));
+		modal.open();
+		(modal.scope as unknown as Scope).press("Enter", { target: buttons()[0] });
+		modal.close();
+		buttons()[1]?.click();
+		await state(modal.result);
+		expect(results).toEqual(["close"]);
+	});
+
 	it("onClose removes the key handler and both click listeners", () => {
 		const remove = vi.spyOn(HTMLElement.prototype, "removeEventListener");
 		const modal = new CloseSubtasksModal(app, 2);

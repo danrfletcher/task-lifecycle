@@ -1,2 +1,4 @@
 tests/fixtures/crlf-note.md -text
 tests/fixtures/lifecycle-demo.md text eol=lf
+tests/fixtures/reading-course.md text eol=lf
+tests/fixtures/reading-course-crlf.md -text

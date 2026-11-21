@@ -15,9 +15,11 @@ import type { Editor } from "obsidian";
 
 import { captureEditorScroll, restoreEditorScrollLater } from "../editor/scroll-preserver";
 import { checkboxTokenRange, getCheckboxStatusChar } from "../domain/line-classifier";
-import { nextStatus } from "../domain/status-sequence";
+import { targetStatus, type PressKind } from "../domain/status-sequence";
 
-export type PressKind = "click" | "longPress";
+// Moved to the pure domain so the source-line edit shares them; re-exported here.
+export { targetStatus };
+export type { PressKind };
 
 export interface StatusWriteResult {
 	/** The status char before the write (raw, e.g. "X"); null if the line is not a task line. */
@@ -26,11 +28,6 @@ export interface StatusWriteResult {
 	to: string | null;
 	/** True if the editor was written to. */
 	didChange: boolean;
-}
-
-/** The status a press moves `from` to. A long press always goes to "-". */
-export function targetStatus(from: string, kind: PressKind): string {
-	return kind === "longPress" ? "-" : nextStatus(from);
 }
 
 /**

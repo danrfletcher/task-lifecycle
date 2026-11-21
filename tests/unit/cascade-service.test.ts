@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createCascadeService,
 	type CascadeEditor,
+	type CascadeFiles,
 	type CascadeService,
 } from "../../src/cascade/cascade-service";
 import type { CascadeChoice, CascadePrompt } from "../../src/cascade/close-subtasks-modal";
@@ -603,5 +604,545 @@ describe("failures are contained", () => {
 		await flush();
 		expect(r.prompt.isOpen).toBe(true);
 		err.mockRestore();
+	});
+});
+
+/**
+ * The closed-note route: the source is not open in any editor, so the text
+ * comes from `files.read` and every subtask is written in one `files.process`
+ * call (a function over the note's string, like `vault.process`).
+ */
+const UNMAPPABLE = "Task Lifecycle: couldn't find this task's source line, nothing changed";
+
+class FakeFiles implements CascadeFiles {
+	processCalls = 0;
+	reads = 0;
+	/** When set, `read` and `process` reject, as for a note that was deleted or renamed. */
+	gone = false;
+	constructor(public text: string) {}
+	async read(): Promise<string> {
+		this.reads += 1;
+		if (this.gone) throw new Error("ENOENT");
+		return this.text;
+	}
+	async process(_file: unknown, fn: (data: string) => string): Promise<void> {
+		this.processCalls += 1;
+		if (this.gone) throw new Error("ENOENT");
+		this.text = fn(this.text);
+	}
+}
+
+interface FileRig {
+	files: FakeFiles;
+	prompt: FakePrompt;
+	settings: SettingsStore;
+	service: CascadeService;
+	notices: string[];
+	/** What `getEditor` returns right now (null = the note is closed). */
+	setEditor(e: CascadeEditor | null): void;
+	/** A rendered checkbox closed the task on `line`: what the embed presser reports. */
+	report(line: number, lineText: string, from: string, to: string, file?: unknown): void;
+}
+
+function makeFileRig(text: string, settings: Partial<TaskLifecycleSettings> = {}): FileRig {
+	const files = new FakeFiles(text);
+	const prompt = new FakePrompt();
+	const events = new TaskLifecycleEvents();
+	const store = new SettingsStore({ loadData: async () => settings, saveData: async () => undefined });
+	void store.update(settings);
+	const notices: string[] = [];
+	let current: CascadeEditor | null = null;
+	const service = createCascadeService({
+		events,
+		settings: store,
+		prompt,
+		getEditor: () => current,
+		files,
+		notify: (m) => notices.push(m),
+		today: () => new Date(2026, 10, 20, 12, 0),
+	});
+	return {
+		files,
+		prompt,
+		settings: store,
+		service,
+		notices,
+		setEditor: (e) => {
+			current = e;
+		},
+		report: (line, lineText, from, to, file = FILE) =>
+			service.reportClose({ file: file as never, line, lineText, from, to }),
+	};
+}
+
+const COURSE = "- [x] Lesson 2 content ✅ 2026-11-20 ^l2\n\t- [ ] Watch video\n\t- [/] Take notes ^n1\n";
+const COURSE_CLOSED =
+	"- [x] Lesson 2 content ✅ 2026-11-20 ^l2\n\t- [x] Watch video ✅ 2026-11-20\n\t- [x] Take notes ✅ 2026-11-20 ^n1\n";
+const PARENT = "- [x] Lesson 2 content ✅ 2026-11-20 ^l2";
+
+describe("closed note: the dialog and the one write (G6, E10)", () => {
+	it("asks with the count from the file, then writes every open subtask in one process call", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+		expect(r.files.processCalls).toBe(0);
+
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(1);
+		expect(r.files.text).toBe(COURSE_CLOSED);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("a cancelled parent gives - and ❌ on the subtasks", async () => {
+		const parent = "- [-] Lesson 2 content ❌ 2026-11-20 ^l2";
+		const r = makeFileRig(parent + "\n\t- [ ] a\n");
+		r.report(0, parent, " ", "-");
+		await flush();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(parent + "\n\t- [-] a ❌ 2026-11-20\n");
+	});
+
+	it("Close stamps off: status only, no emoji (G7)", async () => {
+		const r = makeFileRig("- [x] p ^l2\n\t- [ ] a ^a1\n", { closeStamps: false });
+		r.report(0, "- [x] p ^l2", " ", "x");
+		await flush();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe("- [x] p ^l2\n\t- [x] a ^a1\n");
+	});
+
+	it("\"Leave open\" changes nothing and calls process zero times", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, "/", "x");
+		await flush();
+		r.prompt.answer("leave");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+		expect(r.files.text).toBe(COURSE);
+	});
+
+	it("the singular count: one open subtask", async () => {
+		const r = makeFileRig("- [x] p ✅ 2026-11-20\n\t- [ ] a\n\t- [x] done ✅ 2026-11-01\n");
+		r.report(0, "- [x] p ✅ 2026-11-20", " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([1]);
+	});
+
+	it("CRLF (E5): the write keeps every \\r\\n", async () => {
+		const text = "# T\r\n\r\n" + COURSE.replace(/\n/g, "\r\n");
+		const r = makeFileRig(text);
+		r.report(2, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe("# T\r\n\r\n" + COURSE_CLOSED.replace(/\n/g, "\r\n"));
+	});
+
+	it("mixed line endings are kept as they were, line by line", async () => {
+		const r = makeFileRig("- [x] p ✅ 2026-11-20\r\n\t- [ ] a\n\t- [ ] b\r\n");
+		r.report(0, "- [x] p ✅ 2026-11-20", " ", "x");
+		await flush();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(
+			"- [x] p ✅ 2026-11-20\r\n\t- [x] a ✅ 2026-11-20\n\t- [x] b ✅ 2026-11-20\r\n"
+		);
+	});
+
+	it("nothing is read or written during the report itself: the reading is deferred", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		expect(r.files.reads).toBe(0);
+		await flush();
+		expect(r.files.reads).toBe(1);
+	});
+});
+
+describe("closed note: which closes prompt (G6, G7)", () => {
+	it("a parent with only closed subtasks, or none, or only plain bullets: no dialog and no write", async () => {
+		for (const sub of ["", "\t- [x] a\n\t- [-] b\n", "\t- note\n"]) {
+			const r = makeFileRig("- [x] p ✅ 2026-11-20\n" + sub);
+			r.report(0, "- [x] p ✅ 2026-11-20", " ", "x");
+			await flush();
+			expect(r.prompt.counts).toEqual([]);
+			expect(r.files.processCalls).toBe(0);
+		}
+	});
+
+	it("x <-> - and every reopen never prompt", async () => {
+		for (const [from, to] of [
+			["x", "-"],
+			["-", "x"],
+			["x", " "],
+			["-", " "],
+			["x", "/"],
+		]) {
+			const r = makeFileRig(`- [${to}] p\n\t- [ ] a\n`);
+			r.report(0, `- [${to}] p`, from, to);
+			await flush();
+			expect(r.prompt.counts).toEqual([]);
+		}
+	});
+
+	it("Close cascade off: no dialog, no read, no write", async () => {
+		const r = makeFileRig(COURSE, { closeCascade: false });
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([]);
+		expect(r.files.reads).toBe(0);
+		expect(r.files.processCalls).toBe(0);
+	});
+
+	it("turning Close cascade off while the dialog is open closes it as Leave open; no write follows", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		await r.settings.update({ closeCascade: false });
+		await flush();
+		expect(r.prompt.isOpen).toBe(false);
+		expect(r.files.processCalls).toBe(0);
+	});
+
+	it("an event with no file, or a task that a later press already moved on, opens nothing and shows nothing", async () => {
+		const r = makeFileRig("- [-] p ❌ 2026-11-20\n\t- [ ] a\n");
+		r.report(0, PARENT, " ", "x", null);
+		r.report(0, "- [x] p ✅ 2026-11-20", " ", "x"); // the file already says [-]
+		r.report(9, "- [x] p", " ", "x"); // past the end
+		await flush();
+		expect(r.prompt.counts).toEqual([]);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("without a files port the service is editor-only: a closed note is ignored", async () => {
+		const prompt = new FakePrompt();
+		const store = new SettingsStore({ loadData: async () => ({}), saveData: async () => undefined });
+		const service = createCascadeService({
+			events: new TaskLifecycleEvents(),
+			settings: store,
+			prompt,
+			getEditor: () => null,
+		});
+		service.reportClose({ file: FILE, line: 0, lineText: PARENT, from: " ", to: "x" });
+		await flush();
+		expect(prompt.counts).toEqual([]);
+	});
+});
+
+describe("closed note: locate by content at apply time (E10)", () => {
+	async function open(text = COURSE) {
+		const r = makeFileRig(text);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.isOpen).toBe(true);
+		return r;
+	}
+
+	it("one match, moved by a line inserted above while the dialog is open: found and written", async () => {
+		const r = await open();
+		r.files.text = "new first line\n" + r.files.text;
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe("new first line\n" + COURSE_CLOSED);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("zero matches (the parent was edited): nothing is written, the notice shows, one process call that changed nothing", async () => {
+		const r = await open();
+		const edited = COURSE.replace("Lesson 2 content", "Lesson 2 edited");
+		r.files.text = edited;
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(edited);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("many matches (the parent line was duplicated): nothing is written and the notice shows", async () => {
+		const r = await open();
+		const dup = COURSE + PARENT + "\n\t- [ ] other\n";
+		r.files.text = dup;
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(dup);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("the parent reopened while the dialog is open: nothing is written, no notice", async () => {
+		const r = await open();
+		const reopened = COURSE.replace("[x]", "[ ]").replace(" ✅ 2026-11-20 ^l2", " ^l2");
+		r.files.text = reopened;
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(reopened);
+		expect(r.files.processCalls).toBe(1);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("subtasks changed between the dialog opening and Close subtasks: the walk is recomputed, only tasks still open close", async () => {
+		const r = await open();
+		r.files.text =
+			"- [x] Lesson 2 content ✅ 2026-11-20 ^l2\n\t- [x] Watch video ✅ 2026-11-01\n\t- [/] Take notes ^n1\n\t- [ ] Added later\n";
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(
+			"- [x] Lesson 2 content ✅ 2026-11-20 ^l2\n\t- [x] Watch video ✅ 2026-11-01\n\t- [x] Take notes ✅ 2026-11-20 ^n1\n\t- [x] Added later ✅ 2026-11-20\n"
+		);
+		expect(r.files.processCalls).toBe(1);
+	});
+
+	it("every subtask closed meanwhile: one process call, no change, no notice", async () => {
+		const r = await open();
+		r.files.text = COURSE_CLOSED;
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.text).toBe(COURSE_CLOSED);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("the source is deleted or renamed while the dialog is open: a no-op with the notice, no throw, no unhandled rejection", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (e: unknown) => unhandled.push(e);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const r = await open();
+			r.files.gone = true;
+			r.prompt.answer("close");
+			await flush();
+			expect(r.notices).toEqual([UNMAPPABLE]);
+			await flush();
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
+	it("the source is gone when the dialog would open: the notice shows and no dialog opens", async () => {
+		const r = makeFileRig(COURSE);
+		r.files.gone = true;
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([]);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("the Close cascade setting went off before the answer: nothing is written", async () => {
+		const r = await open();
+		r.prompt.ignoreClose = true;
+		await r.settings.update({ closeCascade: false });
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+	});
+});
+
+describe("closed note: the editor is looked up again at apply time (G8)", () => {
+	it("the source opened in a pane while the dialog is showing: the editor transaction path, not process", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+
+		// The note is now open, with the same text plus unsaved typing at the end.
+		const editor = new FakeEditor([...COURSE.split("\n").slice(0, 3), "typed, not saved"]);
+		r.setEditor(editor);
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+		expect(editor.transactions).toHaveLength(1);
+		expect(editor.lines).toEqual([
+			"- [x] Lesson 2 content ✅ 2026-11-20 ^l2",
+			"\t- [x] Watch video ✅ 2026-11-20",
+			"\t- [x] Take notes ✅ 2026-11-20 ^n1",
+			"typed, not saved",
+		]);
+	});
+
+	it("an open note keeps the editor path from the start: the file port is never touched", async () => {
+		const r = makeFileRig(COURSE);
+		const editor = new FakeEditor(COURSE.split("\n").slice(0, 3));
+		r.setEditor(editor);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.reads).toBe(0);
+		expect(r.files.processCalls).toBe(0);
+		expect(editor.transactions).toHaveLength(1);
+	});
+});
+
+describe("closed note: dedupe, replacement, dispose (E7, E9, E12)", () => {
+	it("the same close reported twice within 1500 ms opens one dialog; 1500 ms later it is a new close", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await vi.advanceTimersByTimeAsync(700);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+		await vi.advanceTimersByTimeAsync(800);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([2, 2]);
+	});
+
+	it("two different parents closed in quick succession: the second dialog replaces the first, which settles as Leave open", async () => {
+		const text = "- [x] one ✅ 2026-11-20 ^o\n\t- [ ] one-a\n- [x] two ✅ 2026-11-20 ^t\n\t- [ ] two-a\n\t- [ ] two-b\n";
+		const r = makeFileRig(text);
+		r.report(0, "- [x] one ✅ 2026-11-20 ^o", " ", "x");
+		r.report(2, "- [x] two ✅ 2026-11-20 ^t", " ", "x");
+		await flush();
+		expect(r.prompt.counts).toEqual([1, 2]);
+		expect(r.files.processCalls).toBe(0);
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(1);
+		expect(r.files.text).toBe(
+			"- [x] one ✅ 2026-11-20 ^o\n\t- [ ] one-a\n- [x] two ✅ 2026-11-20 ^t\n\t- [x] two-a ✅ 2026-11-20\n\t- [x] two-b ✅ 2026-11-20\n"
+		);
+	});
+
+	it("isDialogOpen is true only while a dialog is showing, and a replaced dialog's late settle does not clear the new one", async () => {
+		const text = "- [x] one ✅ 2026-11-20 ^o\n\t- [ ] one-a\n- [x] two ✅ 2026-11-20 ^t\n\t- [ ] two-a\n";
+		const r = makeFileRig(text);
+		expect(r.service.isDialogOpen()).toBe(false);
+		r.report(0, "- [x] one ✅ 2026-11-20 ^o", " ", "x");
+		r.report(2, "- [x] two ✅ 2026-11-20 ^t", " ", "x");
+		await flush();
+		expect(r.service.isDialogOpen()).toBe(true);
+		r.prompt.answer("leave");
+		await flush();
+		expect(r.service.isDialogOpen()).toBe(false);
+	});
+
+	it("dispose with the dialog open closes it as Leave open, writes nothing and stops reporting", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		r.service.dispose();
+		expect(r.prompt.isOpen).toBe(false);
+		expect(r.service.isDialogOpen()).toBe(false);
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+
+		r.report(0, PARENT, " ", "x", OTHER_FILE);
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+	});
+
+	it("an answer of close that arrives after dispose writes nothing and shows nothing", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		r.prompt.ignoreClose = true;
+		r.service.dispose();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("a failure to write after dispose (the writer was shut down first) shows no notice", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x");
+		await flush();
+		r.prompt.ignoreClose = true;
+		r.files.process = async () => {
+			r.service.dispose();
+			throw new Error("disposed");
+		};
+		r.prompt.answer("close");
+		await flush();
+		expect(r.notices).toEqual([]);
+	});
+});
+
+describe("closed note: rename and pane while the dialog is open (T1, T2)", () => {
+	const fileAt = (path: string): { path: string } => ({ path });
+
+	it("the source is renamed while the dialog is open: nothing is written and the notice shows", async () => {
+		const r = makeFileRig(COURSE);
+		const file = fileAt("Course.md");
+		r.report(0, PARENT, " ", "x", file);
+		await flush();
+		expect(r.prompt.counts).toEqual([2]);
+
+		// Obsidian renames the same TFile in place: the file still reads fine at its new path.
+		file.path = "Course-renamed.md";
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+		expect(r.files.text).toBe(COURSE);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("the source is renamed while the dialog is open and is also open in an editor: no transaction, the notice shows", async () => {
+		const r = makeFileRig(COURSE);
+		const file = fileAt("Course.md");
+		r.report(0, PARENT, " ", "x", file);
+		await flush();
+		const editor = new FakeEditor(COURSE.split("\n").slice(0, 3));
+		r.setEditor(editor);
+		file.path = "Course-renamed.md";
+		r.prompt.answer("close");
+		await flush();
+		expect(editor.transactions).toHaveLength(0);
+		expect(r.files.processCalls).toBe(0);
+		expect(r.notices).toEqual([UNMAPPABLE]);
+	});
+
+	it("a note that is not renamed is still written (control)", async () => {
+		const r = makeFileRig(COURSE);
+		r.report(0, PARENT, " ", "x", fileAt("Course.md"));
+		await flush();
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(1);
+		expect(r.notices).toEqual([]);
+	});
+
+	it("cancelPrompt(the dialog's own note) keeps the dialog; the apply then takes the editor path with unsaved typing", async () => {
+		const r = makeFileRig(COURSE);
+		const file = fileAt("Course.md");
+		r.report(0, PARENT, " ", "x", file);
+		await flush();
+
+		// The note is opened in a pane: the workspace says it is showing, and an editor now exists.
+		const editor = new FakeEditor([...COURSE.split("\n").slice(0, 3), "typed, not saved"]);
+		r.setEditor(editor);
+		r.service.cancelPrompt(file as never);
+		await flush();
+		expect(r.prompt.closeOpenCalls).toBe(0);
+		expect(r.prompt.isOpen).toBe(true);
+		expect(r.service.isDialogOpen()).toBe(true);
+
+		r.prompt.answer("close");
+		await flush();
+		expect(r.files.processCalls).toBe(0);
+		expect(editor.transactions).toHaveLength(1);
+		expect(editor.lines[3]).toBe("typed, not saved");
+		expect(editor.lines[1]).toBe("\t- [x] Watch video ✅ 2026-11-20");
+	});
+
+	it("cancelPrompt(another note) closes the dialog as Leave open; so does cancelPrompt with no note", async () => {
+		for (const shown of [fileAt("Other.md"), null, undefined]) {
+			const r = makeFileRig(COURSE);
+			r.report(0, PARENT, " ", "x", fileAt("Course.md"));
+			await flush();
+			r.service.cancelPrompt(shown as never);
+			await flush();
+			expect(r.prompt.isOpen).toBe(false);
+			expect(r.files.processCalls).toBe(0);
+			expect(r.service.isDialogOpen()).toBe(false);
+		}
+	});
+
+	it("cancelPrompt(the note) with no dialog open does nothing", async () => {
+		const r = makeFileRig(COURSE);
+		r.service.cancelPrompt(fileAt("Course.md") as never);
+		await flush();
+		expect(r.service.isDialogOpen()).toBe(false);
 	});
 });

@@ -1,12 +1,16 @@
-import { Plugin } from "obsidian";
+import { Notice, Plugin } from "obsidian";
 
-import { wireCascade } from "./cascade/wire-cascade";
+import { wireCascade, type WiredCascade } from "./cascade/wire-cascade";
 import { createChangeDetector } from "./editor/change-detector";
 import { TaskLifecycleEvents } from "./events/event-bus";
+import { createEmbedPresser, type EmbedPresser } from "./rendered/embed-press";
+import { resolveRenderedTask, type RenderedTaskResult } from "./rendered/resolve-rendered-task";
+import { createSourceWriter, type SourceWriter } from "./rendered/source-writer";
 import { bindCheckboxIcons } from "./settings/checkbox-icons";
 import { SettingsStore } from "./settings/settings";
 import { TaskLifecycleSettingTab } from "./settings/settings-tab";
 import { wireCheckboxPress } from "./status-cycle/wire-checkbox-press";
+import { wireEmbedPress } from "./status-cycle/wire-embed-press";
 
 export default class TaskLifecyclePlugin extends Plugin {
 	/**
@@ -18,9 +22,28 @@ export default class TaskLifecyclePlugin extends Plugin {
 	/** The plugin's own event bus (`task-lifecycle:status-changed`). No public API. */
 	events = new TaskLifecycleEvents();
 
+	/**
+	 * Read-only: where a rendered task checkbox (in an embed or Reading view)
+	 * is in its source note. For the dev console and for later features. It
+	 * writes nothing and adds no command, hotkey or listener.
+	 */
+	resolveRenderedTask = (checkbox: Element): Promise<RenderedTaskResult> =>
+		resolveRenderedTask(this.app, checkbox);
+
+	/**
+	 * The one writer for a task line in a source note, on behalf of a rendered
+	 * checkbox (`press(file, line, kind)`). The embed click handler
+	 * (`wire-embed-press.ts`) calls it through the embed presser. Reachable
+	 * from the dev console for testing only; this is not a public API. Null
+	 * before load and after unload.
+	 */
+	sourceWriter: SourceWriter | null = null;
+
 	private disposeCheckboxIcons: (() => void) | null = null;
 	private disposeCheckboxPress: (() => void) | null = null;
-	private disposeCascade: (() => void) | null = null;
+	private cascade: WiredCascade | null = null;
+	private disposeEmbedPress: (() => void) | null = null;
+	private embedPresser: EmbedPresser | null = null;
 
 	/** Set by `onunload`; stops an `onload` that is still awaiting from wiring anything. */
 	private unloaded = false;
@@ -47,19 +70,58 @@ export default class TaskLifecyclePlugin extends Plugin {
 			app: this.app,
 			settings: this.settings,
 		});
-		this.disposeCascade = wireCascade({
+		const writer = createSourceWriter({
+			app: this.app,
+			getSettings: () => this.settings.get(),
+		});
+		this.sourceWriter = writer;
+		const notify = (message: string): void => {
+			new Notice(message);
+		};
+		const cascade = wireCascade({
 			plugin: this,
 			app: this.app,
 			settings: this.settings,
 			events: this.events,
+			writer,
+			notify,
+		});
+		this.cascade = cascade;
+		this.embedPresser = createEmbedPresser({
+			app: this.app,
+			writer,
+			notify,
+			// An open note's close reaches the cascade through the change
+			// detector; only a write to a closed note is reported here.
+			onClosedNoteWrite: (write) =>
+				cascade.reportClose({
+					file: write.file,
+					line: write.line,
+					lineText: write.lineText,
+					from: write.from,
+					to: write.to,
+				}),
+			isDialogOpen: () => cascade.isDialogOpen(),
+		});
+		this.disposeEmbedPress = wireEmbedPress({
+			plugin: this,
+			workspace: this.app.workspace,
+			presser: this.embedPresser,
+			settings: this.settings,
 		});
 		this.addSettingTab(new TaskLifecycleSettingTab(this.app, this, this.settings));
 	}
 
 	onunload(): void {
 		this.unloaded = true;
-		this.disposeCascade?.();
-		this.disposeCascade = null;
+		this.disposeEmbedPress?.();
+		this.disposeEmbedPress = null;
+		this.embedPresser?.dispose();
+		this.embedPresser = null;
+		this.sourceWriter?.dispose();
+		this.sourceWriter = null;
+		this.cascade?.dispose();
+		this.cascade = null;
 		this.disposeCheckboxPress?.();
 		this.disposeCheckboxPress = null;
 		this.disposeCheckboxIcons?.();

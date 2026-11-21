@@ -38,6 +38,20 @@ describe("targetStatus", () => {
 	});
 });
 
+describe("targetStatus: toggle (Status cycle off)", () => {
+	// The plain toggle: open to done, anything else back to open.
+	it.each([
+		[" ", "x"],
+		["/", " "],
+		["x", " "],
+		["X", " "],
+		["-", " "],
+		["?", " "],
+	])("from %j: toggle -> %j", (from, to) => {
+		expect(targetStatus(from, "toggle")).toBe(to);
+	});
+});
+
 describe("writeStatus: click", () => {
 	it.each(table)("[%s] -> written line and pair", (from, to) => {
 		const { editor, lines, replaceRange } = fakeEditor([`- [${from}] Ship release ^rel1`]);

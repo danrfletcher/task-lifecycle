@@ -3,6 +3,29 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TaskLifecyclePlugin from "../../src/main";
 import { STATUS_CHANGED_EVENT } from "../../src/events/event-bus";
+import { syncRenderedStatus } from "../../src/rendered/embed-press";
+import { fixtureFile } from "../fixtures/source-lines";
+import {
+	TODAY,
+	lessonSection,
+	makeRig,
+	mouseClick,
+	openCourseInEditor,
+	settle,
+	watchNative,
+	type EmbedRig,
+} from "../helpers/embed-rig";
+
+const dialog = vi.hoisted(() => ({ open: vi.fn(async (_count: number): Promise<"close" | "leave"> => "leave") }));
+
+// The cascade dialog is PR-6's; here it is a spy that answers "Leave open".
+vi.mock("../../src/cascade/close-subtasks-modal", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/cascade/close-subtasks-modal")>()),
+	CloseSubtasksDialog: class {
+		open = dialog.open;
+		closeOpen = vi.fn();
+	},
+}));
 
 type MockedPlugin = TaskLifecyclePlugin & {
 	dataFile: unknown;
@@ -106,5 +129,98 @@ describe("G20: Close stamps toggled at runtime on the same editor state", () => 
 		type(2, " ");
 		expect(doc().split("\n")[2]).toBe("- [ ] Later ✅ 2026-11-09");
 		expect(received).toHaveLength(4);
+	});
+});
+
+describe("G7: each toggle flipped between two presses on a rendered box, on one loaded plugin", () => {
+	const LESSON = fixtureFile("embed-lesson.md");
+	const SUBTASKS = LESSON.slice(LESSON.indexOf("\n") + 1);
+	const course = (line0: string) => `${line0}\n${SUBTASKS}`;
+	let rig: EmbedRig;
+
+	afterEach(() => {
+		rig?.plugin.unload();
+		dialog.open.mockClear();
+		document.body.replaceChildren();
+	});
+
+	/** Press the box once and let the write and any dialog run. */
+	async function press(box: HTMLInputElement, shows: string) {
+		syncRenderedStatus(box, shows);
+		const native = watchNative(box);
+		const evt = mouseClick(box);
+		for (let i = 0; i < 4; i++) await settle();
+		expect(evt.defaultPrevented).toBe(true);
+		expect(native.count()).toBe(0);
+	}
+
+	it("Status cycle: on gives the cycle step, off the plain toggle, on again the cycle step", async () => {
+		rig = await makeRig();
+		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
+		await press(boxes[0], " ");
+		expect(rig.courseText()).toBe(course("- [/] Lesson 2 content ^l2")); // cycle: ` ` -> `/`
+		await rig.plugin.settings.update({ statusCycle: false });
+		await press(boxes[0], "/");
+		expect(rig.courseText()).toBe(course("- [ ] Lesson 2 content ^l2")); // toggle: `/` -> ` `
+		await rig.plugin.settings.update({ statusCycle: true });
+		await press(boxes[0], " ");
+		expect(rig.courseText()).toBe(course("- [/] Lesson 2 content ^l2")); // cycle again
+		expect(rig.app.vault.writes).toHaveLength(3);
+	});
+
+	it("Close stamps: off gives an unstamped tick, on stamps the next one, off again leaves the stamp when reopening", async () => {
+		rig = await makeRig({ statusCycle: false, closeStamps: false });
+		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
+		await press(boxes[0], " ");
+		expect(rig.courseText()).toBe(course("- [x] Lesson 2 content ^l2"));
+		await rig.plugin.settings.update({ closeStamps: true });
+		await press(boxes[0], "x"); // reopen
+		await press(boxes[0], " "); // tick again, now stamped
+		expect(rig.courseText()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
+		await rig.plugin.settings.update({ closeStamps: false });
+		await press(boxes[0], "x"); // reopen: the stamp stays
+		expect(rig.courseText()).toBe(course(`- [ ] Lesson 2 content ✅ ${TODAY} ^l2`));
+	});
+
+	it("Close cascade: off writes the parent alone with no dialog, then on asks on the next close", async () => {
+		rig = await makeRig({ statusCycle: false, closeCascade: false });
+		const text = course("- [ ] Lesson 2 content ^l2");
+		rig.app.vault.texts.set("Course.md", text);
+		const cm = openCourseInEditor(rig, text);
+		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
+
+		await press(boxes[0], " "); // close, cascade off
+		expect(dialog.open).not.toHaveBeenCalled();
+		expect(cm.doc()).toBe(course(`- [x] Lesson 2 content ✅ ${TODAY} ^l2`));
+
+		await rig.plugin.settings.update({ closeCascade: true });
+		await press(boxes[0], "x"); // reopen: no cascade for a reopen
+		expect(dialog.open).not.toHaveBeenCalled();
+		await press(boxes[0], " "); // close again, cascade on
+		expect(dialog.open).toHaveBeenCalledTimes(1);
+		expect(dialog.open).toHaveBeenCalledWith(2);
+	});
+
+	it("Checkbox icons: the body class follows each flip while the same plugin and the same box stay loaded", async () => {
+		rig = await makeRig();
+		const { boxes } = rig.addEmbed("Course#^l2", [lessonSection()]);
+		const has = () => document.body.classList.contains("task-lifecycle-checkboxes");
+		expect(has()).toBe(true);
+		await rig.plugin.settings.update({ checkboxIcons: false });
+		expect(has()).toBe(false);
+		await press(boxes[0], " ");
+		await rig.plugin.settings.update({ checkboxIcons: true });
+		expect(has()).toBe(true);
+		expect(document.head.innerHTML).toBe("");
+	});
+
+	it("unloading the plugin removes the body class and leaves nothing in <head>", async () => {
+		rig = await makeRig();
+		const head = document.head.innerHTML;
+		expect(document.body.classList.contains("task-lifecycle-checkboxes")).toBe(true);
+		rig.plugin.unload();
+		expect(document.body.classList.contains("task-lifecycle-checkboxes")).toBe(false);
+		expect(document.head.innerHTML).toBe(head);
+		expect(document.head.querySelector("style, link")).toBeNull();
 	});
 });

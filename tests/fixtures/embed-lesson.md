@@ -1,0 +1,3 @@
+- [ ] Lesson 2 content ^l2
+	- [ ] Watch video
+	- [ ] Take notes

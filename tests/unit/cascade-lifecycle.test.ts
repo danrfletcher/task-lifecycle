@@ -224,6 +224,45 @@ describe("cascade through the plugin", () => {
 		}
 	);
 
+	it("G8: the dialog's own note shown by file-open or active-leaf-change keeps the dialog; another note closes it", async () => {
+		const { plugin, editor } = makePlugin([PARENT, "\t- [ ] a"]);
+		await plugin.onload();
+		closeParent(plugin, 0, "- [x] p");
+		await tick();
+		expect(containers()).toHaveLength(1);
+
+		plugin.app.workspace.trigger("file-open", FILE);
+		plugin.app.workspace.trigger("active-leaf-change", { view: { file: FILE, editor } });
+		await tick();
+		expect(containers()).toHaveLength(1);
+
+		// Unsaved typing in the editor survives the apply: it goes in as an editor transaction.
+		editor.lines.push("typed, not saved");
+		buttons()[0].click();
+		await tick();
+		expect(containers()).toHaveLength(0);
+		expect(editor.transactions).toHaveLength(1);
+		expect(editor.lines[1]).toMatch(/^\t- \[x\] a ✅ \d{4}-\d{2}-\d{2}$/);
+		expect(editor.lines[2]).toBe("typed, not saved");
+	});
+
+	it.each([
+		["file-open", [{ path: "Other.md" }]],
+		["active-leaf-change", [{ view: { file: { path: "Other.md" } } }]],
+		["active-leaf-change", [null]],
+		["active-leaf-change", [{ view: {} }]],
+	])("G14: %s showing another note or none (%j) closes the dialog", async (name, args) => {
+		const { plugin, editor } = makePlugin([PARENT, "\t- [ ] a"]);
+		await plugin.onload();
+		closeParent(plugin, 0, "- [x] p");
+		await tick();
+		expect(containers()).toHaveLength(1);
+		plugin.app.workspace.trigger(name, ...args);
+		await tick();
+		expect(containers()).toHaveLength(0);
+		expect(editor.transactions).toHaveLength(0);
+	});
+
 	it("the dialog is not closed by workspace events after unload registered them away", async () => {
 		const { plugin } = makePlugin([PARENT, "\t- [ ] a"]);
 		await plugin.onload();

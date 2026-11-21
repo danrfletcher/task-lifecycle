@@ -169,6 +169,21 @@ body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="x"] {
 	font-weight: 600;
 }
 
+/* A rendered item holds its whole subtree, so the bold above would reach the
+   subtasks of a done task (the editor has one line per task and never does).
+   Subtasks go back to normal weight; a done subtask is bold again. */
+body.task-lifecycle-checkboxes
+	.task-list-item.is-checked[data-task="x"]
+	.task-list-item {
+	font-weight: var(--font-normal, 400);
+}
+
+body.task-lifecycle-checkboxes
+	.task-list-item.is-checked[data-task="x"]
+	.task-list-item.is-checked[data-task="x"] {
+	font-weight: 600;
+}
+
 /* [-] cancelled: struck through and dimmed */
 body.task-lifecycle-checkboxes .HyperMD-task-line[data-task="-"],
 body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
@@ -178,4 +193,16 @@ body.task-lifecycle-checkboxes .task-list-item.is-checked[data-task="-"] {
 	text-decoration-color: currentColor;
 	opacity: 0.8;
 	font-weight: inherit;
+}
+
+/* A hold on a rendered checkbox (in an embed or in Reading view) cancels the
+   task. On a phone that same hold would open the system callout and start a
+   text selection, so both are turned off on the box itself. The press handler
+   also prevents the contextmenu event; this is the CSS half. */
+body.task-lifecycle-checkboxes .internal-embed input.task-list-item-checkbox,
+body.task-lifecycle-checkboxes .markdown-embed input.task-list-item-checkbox,
+body.task-lifecycle-checkboxes .markdown-preview-view input.task-list-item-checkbox {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
 }
